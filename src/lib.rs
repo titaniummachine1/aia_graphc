@@ -46,6 +46,20 @@ pub enum Op {
     ArrayGetDynamic { arr: usize, i: usize },
     #[serde(rename = "soccer_move")]
     SoccerMove { x: usize, z: usize },
+    #[serde(rename = "tennis_get")]
+    TennisGet {
+        kind: String,
+        index: usize,
+        label: String,
+    },
+    #[serde(rename = "tennis_move")]
+    TennisMove {
+        x: usize,
+        z: usize,
+        swing: Option<usize>,
+        shot: Option<usize>,
+        sprint: Option<usize>,
+    },
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -95,6 +109,14 @@ const PORTS: &[(&str, &[(&str, i32)])] = &[
         &[("Vector31", 0), ("Float1", 1), ("Float2", 1), ("Float3", 1)],
     ),
     ("SoccerController1", &[("Vector31", 0), ("Bool1", 0), ("Bool2", 0)]),
+    ("TennisGetBool", &[("Bool1", 1)]),
+    ("TennisGetFloat", &[("Float1", 1)]),
+    ("TennisGetVector3", &[("Vector31", 1)]),
+    ("TennisGetTransform", &[("Transform1", 1)]),
+    (
+        "TennisController",
+        &[("Vector31", 0), ("Bool1", 0), ("Float1", 0), ("Bool2", 0)],
+    ),
 ];
 
 fn ports_table(kind: &str) -> Vec<(&'static str, i32)> {
@@ -107,9 +129,10 @@ fn ports_table(kind: &str) -> Vec<(&'static str, i32)> {
 
 fn out_port(kind: &str) -> &'static str {
     match kind {
-        "CompareFloats" | "Not" => "Bool1",
+        "CompareFloats" | "Not" | "TennisGetBool" => "Bool1",
         "GetVariable" => "Any1",
-        "ConstructVector3" => "Vector31",
+        "ConstructVector3" | "TennisGetVector3" => "Vector31",
+        "TennisGetTransform" => "Transform1",
         _ => "Float1",
     }
 }
@@ -320,6 +343,34 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 wire_val(&mut em, &vals, *z, vec, "Float3");
                 let n = em.node("SoccerController1", String::new());
                 em.edge(vec, "Vector31", n, "Vector31");
+                vals.push(Val::Const(0.0)); // placeholder: op id alignment
+            }
+            Op::TennisGet { kind, index, .. } => {
+                let node_kind = match kind.as_str() {
+                    "bool" => "TennisGetBool",
+                    "float" => "TennisGetFloat",
+                    "vector3" => "TennisGetVector3",
+                    "transform" => "TennisGetTransform",
+                    other => return Err(format!("unknown tennis sensor kind {other:?}")),
+                };
+                let n = em.node(node_kind, index.to_string());
+                vals.push(Val::Node(n, out_port(node_kind)));
+            }
+            Op::TennisMove { x, z, swing, shot, sprint } => {
+                let vec = em.node("ConstructVector3", String::new());
+                wire_val(&mut em, &vals, *x, vec, "Float1");
+                wire_val(&mut em, &vals, *z, vec, "Float3");
+                let n = em.node("TennisController", String::new());
+                em.edge(vec, "Vector31", n, "Vector31");
+                if let Some(s) = swing {
+                    wire_val(&mut em, &vals, *s, n, "Bool1");
+                }
+                if let Some(s) = shot {
+                    wire_val(&mut em, &vals, *s, n, "Float1");
+                }
+                if let Some(s) = sprint {
+                    wire_val(&mut em, &vals, *s, n, "Bool2");
+                }
                 vals.push(Val::Const(0.0)); // placeholder: op id alignment
             }
         }

@@ -15,13 +15,37 @@ Op set (SSA-ish; ids are line numbers):
   {"op":"array","name":str,"cells":n}            -> handle id
   {"op":"array_set_static","arr":id,"i":n,"v":id}
   {"op":"array_get_static","arr":id,"i":n}
-  {"op":"array_get_dynamic","arr":id,"i":id}
-  {"op":"soccer_move","x":id,"z":id}             (target soccer)
+   {"op":"array_get_dynamic","arr":id,"i":id}
+   {"op":"soccer_move","x":id,"z":id}             (target soccer)
+   {"op":"tennis_get","kind":bool|float|vector3|transform,
+    "index":n,"label":str}                        (target tennis)
+   {"op":"tennis_move","x":id,"z":id,"swing":id|null,
+    "shot":id|null,"sprint":id|null}              (target tennis)
 Output description:
   {"schema":"graphc-desc-v1","target":{"game":..,"version":..},
    "bot_name":str,"ops":[...]}
 """
 from __future__ import annotations
+
+_TENNIS_GET_NODES = {
+    "bool": "TennisGetBool",
+    "float": "TennisGetFloat",
+    "vector3": "TennisGetVector3",
+    "transform": "TennisGetTransform",
+}
+
+
+def tennis_sensor_index(kind: str, label: str) -> tuple[int, str]:
+    """Dropdown label -> builder-order index (what graph JSON modifiers mean)."""
+    from AIGamePyLibrary.data import DROPDOWN_OPTIONS
+
+    node = _TENNIS_GET_NODES.get(kind)
+    if node is None:
+        raise KeyError(f"unknown tennis sensor kind {kind!r}")
+    opts = DROPDOWN_OPTIONS[node]
+    if label not in opts:
+        raise KeyError(f"{label!r} is not a {node} sensor label; options: {opts}")
+    return opts.index(label), label
 
 
 class Sym:
@@ -95,8 +119,8 @@ class GraphCtx:
         if isinstance(v, Sym):
             if v.op_id is not None:
                 return v.op_id
-            return self.const(float(v.const))
-        return self.const(float(v))
+            return self.const(float(v.const)).op_id
+        return self.const(float(v)).op_id
 
     def const(self, v: float) -> Sym:
         key = ("const", float(v))
@@ -134,6 +158,32 @@ class GraphCtx:
             raise TypeError(f"soccer_move is not valid for target {self.target}")
         self.ops.append({"op": "soccer_move", "x": self._desc(x),
                          "z": self._desc(z)})
+
+    def _require_tennis(self) -> None:
+        if self.target[0] != "tennis":
+            raise TypeError(f"tennis API is not valid for target {self.target}")
+
+    def tennis_get(self, kind: str, label: str) -> Sym:
+        """Sensor read by dropdown label; the index is resolved at trace time
+        against AIGamePyLibrary's DROPDOWN_OPTIONS (the builder order the
+        graph JSON means). Both are recorded: index authoritative, label for
+        reviewable descs."""
+        self._require_tennis()
+        idx, label = tennis_sensor_index(kind, label)
+        return self._emit({"op": "tennis_get", "kind": kind,
+                           "index": idx, "label": label})
+
+    def tennis_move(self, x, z, swing=None, shot=None, sprint=None) -> None:
+        """TennisController: Vector31 (move-to / on-hit aim from x,z),
+        Bool1 swing/charge, Float1 shot type, Bool2 sprint (optional)."""
+        self._require_tennis()
+        self.ops.append({
+            "op": "tennis_move",
+            "x": self._desc(x), "z": self._desc(z),
+            "swing": None if swing is None else self._desc(swing),
+            "shot": None if shot is None else self._desc(shot),
+            "sprint": None if sprint is None else self._desc(sprint),
+        })
 
     # --- arrays -------------------------------------------------------------
     def array(self, name: str, cells: int) -> "PackedArray":

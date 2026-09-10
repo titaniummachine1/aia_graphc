@@ -17,6 +17,9 @@ Supported (v1):
     api.arr_set(buf, i, v)        static cell write
     api.arr_get(buf, i)           static cell read
     api.arr_get_dyn(buf, idx)     dynamic cell read (select-chain decode)
+    api.move(x, z)                soccer controller (target soccer)
+    api.tennis_get_bool/float/vector3/transform(label)   sensors (tennis)
+    api.tennis_move(x, z, swing=None, shot=None, sprint=None)  (tennis)
 
 Expressions: numbers, names, + - * / % **, single comparisons, unary -,
 `not`. Anything else = compile error with the offending snippet. api.* calls
@@ -32,6 +35,10 @@ _BIN = {ast.Add: "AddFloats", ast.Sub: "SubtractFloats",
         ast.Mod: "Modulo", ast.Pow: "Power"}
 _CMP = {ast.Lt: "<", ast.Gt: ">", ast.LtE: "<=", ast.GtE: ">=",
         ast.Eq: "==", ast.NotEq: "!="}
+
+_TENNIS_KINDS = {"tennis_get_bool": "bool", "tennis_get_float": "float",
+                 "tennis_get_vector3": "vector3",
+                 "tennis_get_transform": "transform"}
 
 
 class _Ctx:
@@ -143,6 +150,34 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         x, z = args
         ctx.ops.append({"op": "soccer_move", "x": _expr(ctx, x),
                         "z": _expr(ctx, z)})
+        return ctx._desc(0.0)
+    if fn in _TENNIS_KINDS:
+        if ctx.target[0] != "tennis":
+            raise SyntaxError(
+                f"api.{fn} is not valid for target {ctx.target}")
+        (label,) = args
+        kind = _TENNIS_KINDS[fn]
+        from .desc import tennis_sensor_index
+        idx, lab = tennis_sensor_index(kind, ast.literal_eval(label))
+        return ctx._emit({"op": "tennis_get", "kind": kind,
+                          "index": idx, "label": lab})
+    if fn == "tennis_move":
+        if ctx.target[0] != "tennis":
+            raise SyntaxError(
+                f"api.tennis_move is not valid for target {ctx.target}")
+        if not 2 <= len(args) <= 5:
+            raise SyntaxError(
+                "api.tennis_move(x, z, swing=None, shot=None, sprint=None)")
+        opt = [None if a is None or (isinstance(a, ast.Constant)
+                                     and a.value is None) else _expr(ctx, a)
+               for a in args[2:]]
+        x, z = _expr(ctx, args[0]), _expr(ctx, args[1])
+        ctx.ops.append({
+            "op": "tennis_move", "x": x, "z": z,
+            "swing": opt[0] if len(opt) > 0 else None,
+            "shot": opt[1] if len(opt) > 1 else None,
+            "sprint": opt[2] if len(opt) > 2 else None,
+        })
         return ctx._desc(0.0)
     raise SyntaxError(f"unknown api function {fn!r}")
 
