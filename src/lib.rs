@@ -68,17 +68,18 @@ enum Val {
     Node(usize, &'static str), // node index + output port
 }
 
-/// Port tables from the game's node registry (port order preserved).
+/// Port tables from the game's node registry (AIGamePyLibrary `data.ports`;
+/// port order AND polarity preserved — polarity != 0 marks the output port).
 const PORTS: &[(&str, &[(&str, i32)])] = &[
     ("Float", &[("Float1", 1)]),
-    ("AddFloats", &[("Float2", 0), ("Float1", 0), ("Float1", 1)]),
+    ("AddFloats", &[("Float1", 1), ("Float2", 0), ("Float1", 0)]),
     ("SubtractFloats", &[("Float2", 0), ("Float1", 0), ("Float1", 1)]),
-    ("MultiplyFloats", &[("Float2", 0), ("Float1", 0), ("Float1", 1)]),
-    ("DivideFloats", &[("Float2", 0), ("Float1", 0), ("Float1", 1)]),
-    ("Modulo", &[("Float2", 0), ("Float1", 0), ("Float1", 1)]),
-    ("Power", &[("Float2", 0), ("Float1", 0), ("Float1", 1)]),
-    ("CompareFloats", &[("Float2", 0), ("Float1", 0), ("Bool1", 1)]),
-    ("Not", &[("Bool1", 0), ("Bool1", 1)]),
+    ("MultiplyFloats", &[("Float1", 1), ("Float2", 0), ("Float1", 0)]),
+    ("DivideFloats", &[("Float1", 1), ("Float2", 0), ("Float1", 0)]),
+    ("Modulo", &[("Float1", 0), ("Float2", 0), ("Float1", 1)]),
+    ("Power", &[("Float1", 0), ("Float2", 0), ("Float1", 1)]),
+    ("CompareFloats", &[("Bool1", 1), ("Float1", 0), ("Float2", 0)]),
+    ("Not", &[("Bool1", 1), ("Bool1", 0)]),
     (
         "ConditionalSetFloatV2",
         &[("Float1", 0), ("Float2", 0), ("Float1", 1), ("Bool1", 0)],
@@ -87,7 +88,7 @@ const PORTS: &[(&str, &[(&str, i32)])] = &[
     ("SetVariable", &[("Any1", 0)]),
     (
         "ConstructVector3",
-        &[("Float3", 0), ("Float1", 0), ("Float2", 0), ("Vector31", 1)],
+        &[("Vector31", 1), ("Float3", 0), ("Float1", 0), ("Float2", 0)],
     ),
     (
         "Vector3Split",
@@ -127,6 +128,21 @@ fn fmt_float(c: f32) -> String {
     } else {
         format!("{c}")
     }
+}
+
+/// CompareFloats modifier is a Unity Operation dropdown INDEX in the save
+/// (the sim eval parses it as i32; AIGamePyLibrary normalizes "==" -> "0").
+/// The description IR carries the human-readable operator string.
+fn cmp_modifier(cmp: &str) -> String {
+    match cmp {
+        "==" => "0",
+        "<" => "1",
+        ">" => "2",
+        "<=" => "3",
+        ">=" => "4",
+        other => panic!("unknown comparison operator {other:?}"),
+    }
+    .to_string()
 }
 
 struct Emitter {
@@ -217,9 +233,13 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
             Op::VarSet { name, v } => {
                 let n = em.node("SetVariable", name.clone());
                 wire_val(&mut em, &vals, *v, n, "Any1");
+                vals.push(Val::Const(0.0)); // placeholder: op id alignment
             }
             Op::Bin { r#fn, a, b, cmp } => {
-                let modifier = cmp.clone().unwrap_or_default();
+                let modifier = match cmp {
+                    Some(c) => cmp_modifier(c),
+                    None => String::new(),
+                };
                 let n = em.node(r#fn, modifier);
                 wire_val(&mut em, &vals, *a, n, "Float1");
                 wire_val(&mut em, &vals, *b, n, "Float2");
@@ -259,6 +279,7 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                     .entry(k)
                     .or_default()
                     .insert(comp, *v);
+                vals.push(Val::Const(0.0)); // placeholder: op id alignment
             }
             Op::ArrayGetStatic { arr, i } => {
                 let nv = arrays[arr].vec_names.len();
@@ -273,6 +294,9 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 let nv = arrays[arr].vec_names.len();
                 for k in 0..nv {
                     flush_vec(&mut em, *arr, k, &mut pending, &mut arrays, &vals);
+                }
+                for k in 0..nv {
+                    get_split(&mut em, arrays.get_mut(arr).unwrap(), k);
                 }
                 let cells = arrays[arr].cells;
                 let mut acc = cell_val(arrays.get(arr).unwrap(), 0);
@@ -296,6 +320,7 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 wire_val(&mut em, &vals, *z, vec, "Float3");
                 let n = em.node("SoccerController1", String::new());
                 em.edge(vec, "Vector31", n, "Vector31");
+                vals.push(Val::Const(0.0)); // placeholder: op id alignment
             }
         }
     }
@@ -399,23 +424,23 @@ fn node_color() -> serde_json::Value {
 fn emit_save(em: &Emitter) -> serde_json::Value {
     let mut counter = 0u64;
     let node_sids: Vec<String> = (0..em.nodes.len()).map(|_| uuid(&mut counter)).collect();
-    let mut port_sids: Vec<HashMap<String, String>> = Vec::new();
-    for (_, _, ports) in em.nodes.iter() {
-        let mut m = HashMap::new();
-        for (pid, _) in ports {
-            m.insert(pid.to_string(), uuid(&mut counter));
-        }
-        port_sids.push(m);
-    }
+    // One sid per port INSTANCE (registry order). Duplicate port names within
+    // a node (e.g. AddFloats in/out both named "Float1") must keep distinct
+    // sids or connections resolve to the wrong port.
+    let port_sids: Vec<Vec<String>> = em
+        .nodes
+        .iter()
+        .map(|(_, _, ports)| (0..ports.len()).map(|_| uuid(&mut counter)).collect())
+        .collect();
 
     let mut nodes = Vec::new();
     for (i, (kind, modifier, ports)) in em.nodes.iter().enumerate() {
         let mut plist = Vec::new();
-        for (pid, pol) in ports {
+        for (j, (pid, pol)) in ports.iter().enumerate() {
             plist.push(serde_json::json!({
                 "serializableRectTransform": zero_rect(),
                 "id": pid,
-                "sID": port_sids[i][*pid],
+                "sID": port_sids[i][j],
                 "polarity": pol,
                 "controlPointSerializableRectTransform": zero_rect(),
                 "nodeSID": node_sids[i],
@@ -435,12 +460,18 @@ fn emit_save(em: &Emitter) -> serde_json::Value {
         }));
     }
 
-    let find_sid = |n: usize, port: &str| -> String {
-        port_sids[n]
-            .iter()
-            .find(|(k, _)| k.as_str() == port)
-            .map(|(_, v)| v.clone())
-            .unwrap_or_default()
+    // Resolve an edge endpoint to its port sid. Names are ambiguous within a
+    // node, polarity is not: a source needs the output port (polarity != 0),
+    // a destination the input port (polarity == 0) — same rule the sim's
+    // input_port_sid/output_port_sid and AIGamePyLibrary use.
+    let find_sid = |n: usize, port: &str, out: bool| -> String {
+        let (ports, sids) = (&em.nodes[n].2, &port_sids[n]);
+        for (j, (pid, pol)) in ports.iter().enumerate() {
+            if *pid == port && (*pol != 0) == out {
+                return sids[j].clone();
+            }
+        }
+        panic!("node {n} has no {} port named {port:?}", if out { "output" } else { "input" });
     };
 
     let mut conns = Vec::new();
@@ -449,8 +480,8 @@ fn emit_save(em: &Emitter) -> serde_json::Value {
             "sID": uuid(&mut counter),
             "port0InstanceID": 0,
             "port1InstanceID": 0,
-            "port0SID": find_sid(*s, sp),
-            "port1SID": find_sid(*d, dp),
+            "port0SID": find_sid(*s, sp, true),
+            "port1SID": find_sid(*d, dp, false),
         }));
     }
 

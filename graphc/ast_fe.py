@@ -95,7 +95,13 @@ def _expr(ctx: _Ctx, node: ast.expr) -> int:
 
 
 def _api_call(ctx: _Ctx, node: ast.Call) -> int:
-    if not isinstance(node.func, ast.Name) or not node.func.id.startswith("api."):
+    func = node.func
+    if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+            and func.value.id == "api"):
+        fn = func.attr
+    elif isinstance(func, ast.Name) and func.id.startswith("api."):
+        fn = func.id[4:]
+    else:
         raise SyntaxError(
             f"untraceable call {ast.unparse(node)[:60]!r} — only api.* calls "
             "are supported (the game-API whitelist)")
@@ -103,7 +109,6 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         raise SyntaxError(
             "api.* calls inside if branches not supported yet — only "
             "assignments merge; hoist the call")
-    fn = node.func.id[4:]
     args = node.args
     if fn == "var":
         (name,) = args
@@ -132,6 +137,13 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         arr, i = args
         return ctx._emit({"op": "array_get_dynamic", "arr": _expr(ctx, arr),
                           "i": _expr(ctx, i)})
+    if fn == "move":
+        if ctx.target[0] != "soccer":
+            raise SyntaxError(f"api.move is not valid for target {ctx.target}")
+        x, z = args
+        ctx.ops.append({"op": "soccer_move", "x": _expr(ctx, x),
+                        "z": _expr(ctx, z)})
+        return ctx._desc(0.0)
     raise SyntaxError(f"unknown api function {fn!r}")
 
 
