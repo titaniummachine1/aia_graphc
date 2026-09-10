@@ -1,0 +1,16 @@
+[package]
+name = "graphc"
+version = "0.1.0"
+edition = "2021"
+description = "graphc backend: optimize bot descriptions and emit game save graphs"
+
+[lib]
+name = "graphc"
+
+[[bin]]
+name = "graphc-rs"
+path = "src/bin/graphc_rs.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
