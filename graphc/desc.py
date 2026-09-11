@@ -21,6 +21,14 @@ Op set (SSA-ish; ids are line numbers):
     "index":n,"label":str}                        (target tennis)
    {"op":"tennis_move","x":id,"z":id,"swing":id|null,
     "shot":id|null,"sprint":id|null}              (target tennis)
+   {"op":"vec_split","v":id,"i":0|1|2}            vector component -> float
+    (x=0, y=1, z=2; e.g. latch "Legal Serve Target" components in vars)
+   {"op":"vec_make","x":id,"y":id,"z":id}         3 floats -> vector handle
+   {"op":"tennis_move_vec","v":id,"swing":id|null,
+    "shot":id|null,"sprint":id|null}              (target tennis)
+   {"op":"soccer_get","kind":bool|float|vector3|transform,
+    "index":n,"label":str}                         (target soccer; backend
+    lowering pending — backend fails loudly on it today)
 Output description:
   {"schema":"graphc-desc-v1","target":{"game":..,"version":..},
    "bot_name":str,"ops":[...]}
@@ -33,6 +41,35 @@ _TENNIS_GET_NODES = {
     "vector3": "TennisGetVector3",
     "transform": "TennisGetTransform",
 }
+
+#: Pinned (game, version) targets with a game-API surface. ("universal",
+#: any version) is the raw-emission fallback: no game API, only const /
+#: arithmetic / vars / arrays. Anything else fails loudly at trace time
+#: AND in the backend — version strings are never silently accepted.
+SUPPORTED_TARGETS = frozenset({("soccer", "v0.12"), ("tennis", "v0.14")})
+
+
+def check_target(target: tuple[str, str]) -> None:
+    """Reject unknown (game, version) pairs loudly.
+
+    ("universal", <anything>) passes (raw nodes only — the game-API
+    helpers reject it per-call). Everything outside SUPPORTED_TARGETS +
+    universal raises TypeError listing what exists.
+    """
+    if (
+        isinstance(target, tuple)
+        and len(target) == 2
+        and target[0] == "universal"
+        and isinstance(target[1], str)
+    ):
+        return
+    if target in SUPPORTED_TARGETS:
+        return
+    raise TypeError(
+        f"unknown target {target!r} — supported: "
+        f"{sorted(SUPPORTED_TARGETS)} plus (\"universal\", <version>) "
+        "(raw node emission only, no game API)"
+    )
 
 
 def tennis_sensor_index(kind: str, label: str) -> tuple[int, str]:
@@ -48,9 +85,34 @@ def tennis_sensor_index(kind: str, label: str) -> tuple[int, str]:
     return opts.index(label), label
 
 
+_SOCCER_GET_NODES = {
+    "bool": "SoccerGetBool",
+    "float": "SoccerGetFloat",
+    "vector3": "SoccerGetVector3",
+    "transform": "SoccerGetTransform",
+}
+
+
+def soccer_sensor_index(kind: str, label: str) -> tuple[int, str]:
+    """Soccer dropdown label -> builder-order index.
+
+    NOTE: the Rust backend does not lower soccer_get yet (loud error there);
+    tennis is the verified path. This resolver pins the ABI now so bots can
+    author against it.
+    """
+    from AIGamePyLibrary.data import DROPDOWN_OPTIONS
+
+    node = _SOCCER_GET_NODES.get(kind)
+    if node is None:
+        raise KeyError(f"unknown soccer sensor kind {kind!r}")
+    opts = DROPDOWN_OPTIONS[node]
+    if label not in opts:
+        raise KeyError(f"{label!r} is not a {node} sensor label; options: {opts}")
+    return opts.index(label), label
+
+
 class Sym:
     """Traced value: description op id or folded constant."""
-
     __slots__ = ("ctx", "op_id", "const")
 
     def __init__(self, ctx, op_id=None, const=None):
@@ -110,6 +172,7 @@ class Sym:
 
 class GraphCtx:
     def __init__(self, target: tuple[str, str]):
+        check_target(target)
         self.target = target
         self.ops: list[dict] = []
         self._cse: dict = {}
@@ -185,6 +248,32 @@ class GraphCtx:
             "sprint": None if sprint is None else self._desc(sprint),
         })
 
+    def tennis_move_vec(self, v, swing=None, shot=None, sprint=None) -> None:
+        """TennisController driven by a prebuilt vector (vec_make handle or
+        tennis_get vector3/transform) instead of x/z floats."""
+        self._require_tennis()
+        self.ops.append({
+            "op": "tennis_move_vec",
+            "v": self._desc(v),
+            "swing": None if swing is None else self._desc(swing),
+            "shot": None if shot is None else self._desc(shot),
+            "sprint": None if sprint is None else self._desc(sprint),
+        })
+
+    # --- vectors ------------------------------------------------------------
+    def vec_split(self, v, i: int) -> Sym:
+        """Vector component -> float (i: 0=x, 1=y, 2=z). The backend shares
+        one Vector3Split node per source vector; each component is CSE'd."""
+        if int(i) not in (0, 1, 2):
+            raise ValueError(f"vec_split component must be 0/1/2, got {i!r}")
+        return self._emit({"op": "vec_split", "v": self._desc(v),
+                           "i": int(i)})
+
+    def vec_make(self, x, y, z) -> Sym:
+        """3 floats -> opaque vector handle (backend: ConstructVector3)."""
+        return self._emit({"op": "vec_make", "x": self._desc(x),
+                           "y": self._desc(y), "z": self._desc(z)})
+
     # --- arrays -------------------------------------------------------------
     def array(self, name: str, cells: int) -> "PackedArray":
         arr = PackedArray(self, name, cells)
@@ -233,3 +322,75 @@ def describe(target: tuple[str, str], builder) -> dict:
     ctx = GraphCtx(target)
     builder(ctx)
     return ctx.finish()
+
+
+# --- gcc-inspired peephole passes: cost = per-tick node transitions --------
+_REF_KEYS = ("a", "b", "c", "t", "f", "v", "x", "z", "swing", "shot",
+             "sprint", "arr", "i")
+# Per-op fields that LOOK like ints but are literals, never op refs.
+_LITERAL_KEYS = {
+    "array_set_static": {"i"},
+    "array_get_static": {"i"},
+    "vec_split": {"i"},
+}
+# Side-effect sinks: DCE roots. Everything else must feed a sink.
+_SINKS = {"var_set", "array_set_static", "soccer_move", "tennis_move",
+          "tennis_move_vec"}
+
+
+def _refs(op: dict):
+    lit = _LITERAL_KEYS.get(op["op"], set())
+    for k in _REF_KEYS:
+        v = op.get(k)
+        if isinstance(v, int) and k not in lit:
+            yield k, v
+
+
+def optimize_ops(ops: list[dict], level: int = 1) -> list[dict]:
+    """Semantics-preserving transition shavers (no arithmetic folding —
+    float rounding must stay bit-identical to per-tick game evaluation).
+
+    - select-fold: select(c, t, t) -> t (both arms evaluate per tick, so a
+      same-value select is pure waste).
+    - DCE: drop ops unreachable from side-effect sinks (dead sensors,
+      orphaned consts, folded selects).
+    """
+    if level < 1:
+        return ops
+    ops = [dict(o) for o in ops]
+    changed = True
+    while changed:
+        changed = False
+        rep = {}
+        for i, o in enumerate(ops):
+            if o["op"] == "select" and o["t"] == o["f"]:
+                rep[i] = o["t"]
+                changed = True
+        if rep:
+            def resolve(v):
+                while isinstance(v, int) and v in rep:
+                    v = rep[v]
+                return v
+
+            for o in ops:
+                for k, v in _refs(o):
+                    o[k] = resolve(v)
+    live: set[int] = set()
+    stack = [i for i, o in enumerate(ops) if o["op"] in _SINKS]
+    while stack:
+        i = stack.pop()
+        if i in live:
+            continue
+        live.add(i)
+        for _, v in _refs(ops[i]):
+            if v not in live:
+                stack.append(v)
+    keep = sorted(live)
+    remap = {old: new for new, old in enumerate(keep)}
+    out = []
+    for old in keep:
+        o = dict(ops[old])
+        for k, v in _refs(o):
+            o[k] = remap[v]
+        out.append(o)
+    return out
