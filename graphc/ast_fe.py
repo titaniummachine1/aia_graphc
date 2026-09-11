@@ -102,6 +102,14 @@ class _Ctx:
         self._functions: dict = {}
         self._imports: dict[str, str] = {}
         self._active: set = set()
+        # Per-tick idiot-proofing (reset per compile — NEVER carried across
+        # ticks, and never silently resolved):
+        # _set_vars/_arrays/_controller catch double-writes whose in-game
+        # order would be ambiguous (if the bot misbehaves, it is the
+        # author's bug, and it fails HERE, not in the game).
+        self._set_vars: set[str] = set()
+        self._arrays: set[str] = set()
+        self._controller: str | None = None
 
     def _desc(self, v: float) -> int:
         key = ("const", float(v))
@@ -164,6 +172,22 @@ def _expr(ctx: _Ctx, node: ast.expr) -> int:
             if "whitelist" not in str(e):
                 raise
             return _project_call(ctx, node)
+    if isinstance(node, ast.BoolOp):
+        raise SyntaxError(
+            f"'and/or' is not compilable — nest if statements: "
+            f"{ast.unparse(node)[:60]!r}")
+    if isinstance(node, ast.IfExp):
+        raise SyntaxError(
+            f"x-if-c-else is not compilable — use if/else assignments: "
+            f"{ast.unparse(node)[:60]!r}")
+    if isinstance(node, ast.Subscript):
+        raise SyntaxError(
+            f"subscripts are not compilable — arrays use api.arr_get: "
+            f"{ast.unparse(node)[:60]!r}")
+    if isinstance(node, ast.NamedExpr):
+        raise SyntaxError(
+            f"walrus is not compilable — assign first: "
+            f"{ast.unparse(node)[:60]!r}")
     raise SyntaxError(f"unsupported expression: {ast.unparse(node)[:80]!r}")
 
 
@@ -230,6 +254,15 @@ def _project_call(ctx: _Ctx, node: ast.Call) -> int:
     ctx._active.add(qual)
     try:
         for i, p in enumerate(params):
+            if p == "api" and not (
+                    i < len(node.args)
+                    and isinstance(node.args[i], ast.Name)
+                    and node.args[i].id == "api"
+                    and "api" not in ctx._env):
+                raise SyntaxError(
+                    "parameter 'api' shadows the game-API namespace — "
+                    "rename it (api.* calls work inside helpers without "
+                    "passing api)")
             if i < len(node.args):
                 a = node.args[i]
                 if isinstance(a, ast.Name) and a.id == "api" \
@@ -258,7 +291,19 @@ def _project_call(ctx: _Ctx, node: ast.Call) -> int:
 
 def _targetmod_call(ctx: _Ctx, node: ast.Call, game: str, ver: str,
                     fn: str) -> int:
-    """AIA_Comp_Libry.tennis.v014.ball_incoming() -> the tennis_get op."""
+    """AIA_Comp_Libry.tennis.v014.ball_incoming() -> the tennis_get op.
+
+    Unversioned game paths resolve to latest; anything that does not match
+    the compile target fails loudly, so a bot can never silently mean a
+    different game version than it runs on.
+    """
+    from .desc import LATEST_TARGETS
+    if game not in LATEST_TARGETS:
+        raise SyntaxError(
+            f"unknown API game {LIBRY}.{game} — known: "
+            f"{sorted(LATEST_TARGETS)}")
+    if ver == "latest":
+        ver = _norm_ver(LATEST_TARGETS[game])
     if game != ctx.target[0] or ver != _norm_ver(ctx.target[1]):
         raise SyntaxError(
             f"API module {LIBRY}.{game}.{ver} does not match compile target "
@@ -281,7 +326,7 @@ def _targetmod_call(ctx: _Ctx, node: ast.Call, game: str, ver: str,
     kind, label = sensors[fn]
     if game_c == "tennis":
         from .desc import tennis_sensor_index
-        idx, lab = tennis_sensor_index(kind, label)
+        idx, lab = tennis_sensor_index(kind, label, ctx.target[1])
         return ctx._emit({"op": "tennis_get", "kind": kind,
                           "index": idx, "label": lab})
     from .desc import soccer_sensor_index
@@ -327,13 +372,25 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         return ctx._emit({"op": "var_get", "name": ast.literal_eval(name)})
     if fn == "set_var":
         name, v = args
-        ctx.ops.append({"op": "var_set", "name": ast.literal_eval(name),
+        sname = ast.literal_eval(name)
+        if sname in ctx._set_vars:
+            raise SyntaxError(
+                f"api.set_var({sname!r}) twice in one tick — the in-game "
+                "write order would be ambiguous; merge into one call")
+        ctx._set_vars.add(sname)
+        ctx.ops.append({"op": "var_set", "name": sname,
                         "v": _expr(ctx, v)})
         return ctx._desc(0.0)
     if fn == "array":
         name, cells = args
+        aname = ast.literal_eval(name)
+        if aname in ctx._arrays:
+            raise SyntaxError(
+                f"api.array({aname!r}) twice in one tick — declare once, "
+                "share the handle")
+        ctx._arrays.add(aname)
         op_id = len(ctx.ops)
-        ctx.ops.append({"op": "array", "name": ast.literal_eval(name),
+        ctx.ops.append({"op": "array", "name": aname,
                         "cells": ast.literal_eval(cells)})
         return op_id
     if fn == "arr_set":
@@ -352,6 +409,7 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
     if fn == "move":
         if ctx.target[0] != "soccer":
             raise SyntaxError(f"api.move is not valid for target {ctx.target}")
+        _claim_controller(ctx, "move")
         x, z = args
         ctx.ops.append({"op": "soccer_move", "x": _expr(ctx, x),
                         "z": _expr(ctx, z)})
@@ -373,6 +431,7 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         if not 2 <= len(args) <= 5:
             raise SyntaxError(
                 "api.tennis_move(x, z, swing=None, shot=None, sprint=None)")
+        _claim_controller(ctx, "tennis_move")
         opt = [None if a is None or (isinstance(a, ast.Constant)
                                      and a.value is None) else _expr(ctx, a)
                for a in args[2:]]
@@ -391,6 +450,7 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         if not 1 <= len(args) <= 4:
             raise SyntaxError(
                 "api.tennis_move_vec(v, swing=None, shot=None, sprint=None)")
+        _claim_controller(ctx, "tennis_move_vec")
         opt = [None if a is None or (isinstance(a, ast.Constant)
                                      and a.value is None) else _expr(ctx, a)
                for a in args[1:]]
@@ -415,15 +475,30 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
     raise SyntaxError(f"unknown api function {fn!r}")
 
 
+def _claim_controller(ctx: _Ctx, what: str) -> None:
+    if ctx._controller is not None:
+        raise SyntaxError(
+            f"two controllers in one tick ({ctx._controller} + {what}) — "
+            "the in-game winner would be ambiguous; merge into one call "
+            "with if/else assignments")
+    ctx._controller = what
+
+
 def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
     if isinstance(s, ast.Assign):
         if len(s.targets) != 1 or not isinstance(s.targets[0], ast.Name):
             raise SyntaxError("only single-name assignments")
+        if s.targets[0].id == "api":
+            raise SyntaxError(
+                "cannot assign to 'api' — it is the game-API namespace")
         ctx._env[s.targets[0].id] = _expr(ctx, s.value)
     elif isinstance(s, ast.AugAssign):
         if not isinstance(s.target, ast.Name):
             raise SyntaxError("augmented assign to non-name")
         name = s.target.id
+        if name == "api":
+            raise SyntaxError(
+                "cannot assign to 'api' — it is the game-API namespace")
         if name not in ctx._env:
             raise SyntaxError(f"name {name!r} used before assignment")
         fn = _BIN.get(type(s.op))
@@ -472,7 +547,7 @@ def compile_source(source: str, target: tuple[str, str], opt: int = 1) -> dict:
     single top-level function (same rule as compile_project).
     opt: 0 = raw ops, 1 = transition-shaving passes (DCE, select-fold).
     """
-    return _assemble({"": ast.parse(source)}, [""], target, opt)
+    return _assemble({"": ast.parse(source)}, [""], target, opt, {""})
 
 
 def _load_module(path: str) -> ast.Module:
@@ -506,6 +581,7 @@ def compile_project(entry: str, target: tuple[str, str], opt: int = 1) -> dict:
     base_dir = os.path.dirname(entry)
     modules: dict[str, ast.Module] = {"": _load_module(entry)}
     order = [""]
+    real_mods = {""}
     # Fixed-point import crawl (cycles fail loudly at the end).
     seen_files = {entry}
     i = 0
@@ -521,6 +597,7 @@ def compile_project(entry: str, target: tuple[str, str], opt: int = 1) -> dict:
                         continue
                     fp = _resolve_file(base_dir, a.name)
                     key = a.asname or a.name
+                    real_mods.add(a.name)
                     if fp not in seen_files:
                         seen_files.add(fp)
                         modules[key] = _load_module(fp)
@@ -534,11 +611,12 @@ def compile_project(entry: str, target: tuple[str, str], opt: int = 1) -> dict:
                 if s.level:
                     raise SyntaxError("relative imports are not compilable")
                 fp = _resolve_file(base_dir, s.module or "")
+                real_mods.add(s.module or "")
                 if fp not in seen_files:
                     seen_files.add(fp)
                     modules[s.module or ""] = _load_module(fp)
                     order.append(s.module or "")
-    return _assemble(modules, order, target, opt)
+    return _assemble(modules, order, target, opt, real_mods)
 
 
 def _const_number(node: ast.expr) -> float | None:
@@ -552,7 +630,9 @@ def _const_number(node: ast.expr) -> float | None:
 
 
 def _assemble(modules: dict[str, ast.Module], order: list[str],
-              target: tuple[str, str], opt: int = 1) -> dict:
+              target: tuple[str, str], opt: int = 1,
+              real_mods: set[str] | None = None) -> dict:
+    real_mods = real_mods if real_mods is not None else set(order)
     ctx = _Ctx(target)
     # Register functions + import aliases per module.
 
@@ -566,6 +646,10 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
         tree = modules[mod]
         for s in tree.body:
             if isinstance(s, ast.FunctionDef):
+                if s.name == "api":
+                    raise SyntaxError(
+                        "cannot name a function 'api' — it is the "
+                        "game-API namespace")
                 if (mod, s.name) in ctx._functions:
                     raise SyntaxError(f"duplicate function {s.name!r}")
                 ctx._functions[(mod, s.name)] = s
@@ -580,7 +664,26 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
                                 "(e.g. import AIA_Comp_Libry.tennis.v014 as t)")
                         game, ver = _libry_key(a.name)
                         _alias(a.asname, f"@{game}/{ver}", "libry")
+                    elif a.name == LIBRY or a.name.startswith(LIBRY + "."):
+                        # import AIA_Comp_Libry.tennis as t -> latest
+                        parts = a.name.split(".")
+                        if len(parts) != 2 or not a.asname:
+                            raise SyntaxError(
+                                f"import {a.name!r}: use "
+                                "import AIA_Comp_Libry.<game> as t "
+                                "(latest) or the full "
+                                "AIA_Comp_Libry.<game>.<version> path")
+                        _alias(a.asname, f"@{parts[1].lower()}/latest",
+                               "libry")
                     else:
+                        # Project file (validated by the crawl): alias the
+                        # dotted path for mod.attr resolution. Single
+                        # scripts cannot import project files.
+                        if a.name not in real_mods:
+                            raise SyntaxError(
+                                f"import {a.name!r} is not a project file "
+                                "(whitelist: api, AIA_Comp_Libry, project "
+                                "files — use compile_project for multi-file)")
                         _alias(a.asname or a.name, a.name, "import")
             elif isinstance(s, ast.ImportFrom):
                 if _libry_key(s.module or ""):
@@ -593,19 +696,39 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
                                "libry-from-import")
                 elif (s.module or "") == LIBRY or \
                         (s.module or "").startswith(LIBRY + "."):
-                    # from AIA_Comp_Libry.tennis import v014
+                    # from AIA_Comp_Libry.tennis import v014  (module alias)
+                    # from AIA_Comp_Libry.tennis import sensor (latest sensor)
                     parts = (s.module or "").split(".")
-                    if len(parts) != 2 or parts[0] != LIBRY:
+                    if len(parts) > 3 or parts[0] != LIBRY:
                         raise SyntaxError(
                             f"import {s.module!r}: use the full "
                             "AIA_Comp_Libry.<game>.<version> path")
+                    from .desc import LATEST_TARGETS
                     for a in s.names:
                         if a.name == "*":
                             raise SyntaxError(
                                 "star imports are not compilable")
-                        _alias(a.asname or a.name,
-                               f"@{parts[1].lower()}/{_norm_ver(a.name)}",
-                               "libry-from-import")
+                        if len(parts) == 1:
+                            # from AIA_Comp_Libry import tennis (latest)
+                            _alias(a.asname or a.name,
+                                   f"@{a.name.lower()}/latest",
+                                   "libry-from-import")
+                        elif len(parts) == 3:
+                            game, ver = parts[1].lower(), _norm_ver(parts[2])
+                            _alias(a.asname or a.name, f"@{game}/{ver}.{a.name}",
+                                   "libry-from-import")
+                        elif _norm_ver(a.name) in (
+                                _norm_ver(v) for v in LATEST_TARGETS.values()) \
+                                or a.name.lower() in LATEST_TARGETS:
+                            # version module alias
+                            _alias(a.asname or a.name,
+                                   f"@{parts[1].lower()}/{_norm_ver(a.name)}",
+                                   "libry-from-import")
+                        else:
+                            # unversioned sensor: latest, pinned at call time
+                            _alias(a.asname or a.name,
+                                   f"@{parts[1].lower()}/latest.{a.name}",
+                                   "libry-from-import")
                 elif s.module == "api" or (s.module or "").startswith("api."):
                     for a in s.names:
                         if a.name == "*":
@@ -614,6 +737,10 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
                         _alias(a.asname or a.name, "api." + a.name,
                                "from-import")
                 else:
+                    if (s.module or "") not in real_mods:
+                        raise SyntaxError(
+                            f"from {s.module!r} import is not a project file "
+                            "(whitelist: api, AIA_Comp_Libry, project files)")
                     for a in s.names:
                         if a.name == "*":
                             raise SyntaxError(
@@ -633,13 +760,29 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
                     "functions, imports and numeric constants live at "
                     "project top level")
     # Numeric module constants (tuning tables living at top level).
+    # Same name + same value in two files is fine; same name with a
+    # DIFFERENT value fails loudly (silent first-wins would mean something
+    # other than what one of the files says).
+    seen_consts: dict[str, float] = {}
     for mod in order:
         for s in modules[mod].body:
             if isinstance(s, ast.Assign) and len(s.targets) == 1 and \
                     isinstance(s.targets[0], ast.Name):
                 v = _const_number(s.value)
-                if v is not None and s.targets[0].id not in ctx._env:
-                    ctx._env[s.targets[0].id] = ctx._desc(v)
+                if v is None:
+                    continue
+                nm = s.targets[0].id
+                if nm == "api":
+                    raise SyntaxError(
+                        "cannot name a constant 'api' — it is the "
+                        "game-API namespace")
+                if nm in seen_consts and seen_consts[nm] != v:
+                    raise SyntaxError(
+                        f"constant {nm!r} has conflicting values "
+                        f"({seen_consts[nm]} vs {v}) across project files")
+                seen_consts[nm] = v
+                if nm not in ctx._env:
+                    ctx._env[nm] = ctx._desc(v)
     bots = [(m, n) for (m, n) in ctx._functions if n == "tick"]
     if not bots:
         singles = {}

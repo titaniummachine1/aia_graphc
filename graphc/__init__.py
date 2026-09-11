@@ -13,17 +13,24 @@ Usage (authoring path: plain Python -> description IR -> graphc-rs backend):
     subprocess.run(["graphc-rs", "bot.desc.json", "bot.txt"], check=True)
 
 Rules (enforced at trace time — the supported-API whitelist):
-  - Only the api.* surface + arithmetic on traced values; anything
-    untraceable fails loudly with a pointing error, never silently
-    misbehaves.
-  - Dynamic `if` is real syntax (SSA phi-merge via select nodes); dynamic
-    `while`/`for`/imports are rejected — express state across ticks with
-    api.set_var (both arms evaluate per tick — semantics match the game).
-  - Targets are explicit: compile for (game, version) from the pinned
-    target tables (sensors/controllers differ per version). A "universal"
-    target exists for unknown games: raw node emission only, no game API.
-  - Cross-tick memory: api.var/api.set_var (named latch) and api.array +
-    api.arr_set/arr_get/arr_get_dyn (packed Vector3 cells).
+   - Only the api.* surface + project code + arithmetic on traced values;
+     anything untraceable fails loudly with a pointing error, never
+     silently misbehaves. A 30-misuse battery pins this: shadowed api,
+     double controllers/latches, stdlib imports, wrong game/version,
+     unknown sensors, while/for, and/or, ternaries, subscripts, walrus,
+     recursion — all loud.
+   - Dynamic `if` is real syntax (SSA phi-merge via select nodes);
+     dynamic `while`/`for` are rejected — express state across ticks with
+     api.set_var (both arms evaluate per tick — semantics match the game).
+   - Multi-file projects via compile_project (imports resolved, functions
+     inlined); per-(game,version) API: import AIA_Comp_Libry.tennis.v014
+     (or unversioned .tennis = latest). Version mismatch fails loudly.
+   - Targets are explicit: compile for (game, version) from the pinned
+     target tables (sensors/controllers differ per version). A "universal"
+     target exists for unknown games: raw node emission only, no game API.
+   - Cross-tick memory: api.var/api.set_var (named latch, written once per
+     tick) and api.array + api.arr_set/arr_get/arr_get_dyn (packed
+     Vector3 cells). One controller call per tick.
 Cost model: per-tick node transitions (nodes + edges) — the C# per-tick
 overhead metric. graphc-rs prints the report; CI fails on regressions.
 """

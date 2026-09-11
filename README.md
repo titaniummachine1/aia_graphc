@@ -1,103 +1,112 @@
-# graphc — compile code into AIA graph bots
+# graphc — write Python, get a game AI
 
-Separate from the simulator on purpose: the simulator replays graphs, this
-library turns **source code** into graphs. Architecture follows the classic
-compiler pipeline (gcc/LLVM/rustc shape, scaled down):
+Turn a plain Python bot into a visual-script graph the game loads directly.
+You never touch nodes, ports, or wires — the compiler does that optimally.
 
-```
-Python lib (now)   ─┐
-                    ├─► bot description (language-neutral JSON IR)
-Lua subset (maybe) ─┘          │
-                               ▼
-                 graphc backend (Rust, graphc-rs): optimize (const-fold,
-                 CSE, write-merge, budget check on per-tick transitions)
-                 + emit game save format for an explicit (game, version)
-                 target
-                               │
-               ┌───────────────┴────────────────┐
-               ▼                                ▼
-         game save folder                 aia_comp-sim VM (CI)
-         (play immediately)               (replay + assert before play)
-```
+## Simplest possible bot (tennis, 30 seconds)
 
-Rust stays as the backend + sim language. A Rust *source* frontend
-(compiling Rust code into graphs) is shelved — absurd cost/benefit while
-the Python frontend is unfinished. A Lua source frontend is the preferred
-second language if anyone wants it (same description IR, zero backend
-changes).
-
-## The writer's experience (the whole point)
-
+`mybot/entry.py`:
 ```python
-from graphc.ast_fe import compile_source
+import AIA_Comp_Libry.tennis as t
+
+def tick(api):
+    if t.is_self_actively_serving():
+        mx = -1.6
+        mz = 10.5
+    else:
+        mx = 0.0
+        mz = 11.0
+    t.move(mx, mz, t.ball_in_swing_range(), 2.0)
+```
+
+Compile it:
+```python
+from graphc import compile_project
 import json, subprocess
 
-source = '''
-def bot(api):
-    cnt = api.var("cnt")          # cross-tick RAM
-    nxt = cnt + 1                 # plain arithmetic
-    api.set_var("cnt", nxt)       # latches
-    buf = api.array("buf", 16)    # packed storage
-    api.arr_set(buf, 5, 3.25)
-    v = api.arr_get_dyn(buf, cnt % 16)  # dynamic index
-    flag = 1.0
-    if cnt > 12:                  # real if/else, SSA phi-merged to select
-        flag = 2.0
-    api.move(v + flag, nxt)
-'''
-
-desc = compile_source(source, ("soccer", "v0.12"))
-json.dump(desc, open("bot.desc.json", "w"))  # language-neutral IR, diffable
-subprocess.run(["graphc-rs", "bot.desc.json", "bot.txt"], check=True)
-# -> game save folder directly, plus a per-tick transition cost report
+desc = compile_project("mybot/entry.py", ("tennis", "v15f"))
+json.dump(desc, open("mybot.desc.json", "w"))
+subprocess.run(["graphc-rs", "mybot.desc.json", "mybot.txt"], check=True)
 ```
 
-No node ids, no ports, no Float1. Dynamic `if`/`while` are rejected at
-trace time with a pointing error (`select()` instead — both arms evaluate
-per tick anyway, so semantics match the game). Anything untraceable fails
-loudly: the supported-API whitelist is enforced, not promised.
+Drop `mybot.txt` into `[game]/AIComp_Data/Saves/Tennis/`, load `mybot`
+in the node editor. Done — it serves, rallies, and swings.
 
-## Why a description layer (not Python-nodes directly)
+Three commands, total:
+```
+python -m pip install <this repo>   # once (needs GRAPHC_PYLIB, see below)
+compile_project("mybot/entry.py", ("tennis", "v15f"))   # bot -> graph IR
+graphc-rs mybot.desc.json mybot.txt                     # graph IR -> game save
+```
 
-1. **Two languages, one backend** — the Rust crate emits the same
-   description; the optimizing backend and its cost model exist once.
-2. **CI-friendly** — descriptions are diffable, cacheable, reviewable; the
-   sim replays a description without needing the Python runtime.
-3. **Version pinning** — the backend owns the (game, version) tables
-   (sensor ABI, controller ports). Frontends stay target-agnostic.
-4. Same trick as LLVM IR / GCC's GIMPLE: many sources, one optimizer.
+## How it works (the 1-minute version)
 
-## Targets
+- `tick(api)` runs once per game tick. Read the game through `t.*`
+  sensors (`t.ball_speed()`), answer through `t.move(...)`.
+- `import AIA_Comp_Libry.tennis as t` = latest tennis(nodes). Pin an
+  exact version with `import AIA_Comp_Libry.tennis.v014 as t` instead.
+  Wrong version for your target fails at compile time, loudly.
+- Plain Python otherwise: helpers in any file (`import aim` just works),
+  arithmetic, `if/else`, named memory (`api.var` / `api.set_var`),
+  arrays (`api.array` + `arr_set` / `arr_get`). One controller call
+  (`t.move`) per tick.
+- Anything the compiler cannot turn into nodes fails HERE with a pointing
+  error — never a silently different bot. If your AI misbehaves in game,
+  it is doing exactly what you coded.
 
-Explicit, always: `("soccer", "v0.12")`, `("tennis", "v0.14")`, or
-`("universal", version)` for unsupported games (raw node emission only, no
-game API). Sensor/controller helpers exist only for pinned targets; the
-pinned set lives in `graphc/desc.py` (`SUPPORTED_TARGETS`/`check_target`,
-enforced at trace time AND in the backend). Tennis sensor dropdown indices
-resolve at trace time against AIGamePyLibrary's `DROPDOWN_OPTIONS`.
+## The guarantee (idiot-proofing)
 
-## Cost model
+30-misuse battery, all loud, zero silent miscompiles: shadowed `api`,
+double controllers / double latch writes, stdlib imports, wrong game or
+version, unknown sensors, tuple unpacking, `while`/`for`, `and`/`or`,
+ternaries, subscripts, walrus, recursion, top-level statements,
+conflicting constants across files. Behaviour in game == behaviour coded.
 
-Per-tick node transitions (nodes + edges) — each traversal is C# overhead
-the game pays every tick. Optimizations minimize THIS, not code size or
-FLOPs. Every compile returns the report; CI fails on regressions.
+## API reference
 
-## Status
+Every sensor is a typed, documented function — hover in any IDE:
+`graphc/api/AIA_Comp_Libry/tennis/v15f.py` (108: bools, floats, vectors,
+transforms), `soccer/v012.py` (175). Generated from the game's own
+dropdown tables, so names can never drift: `t.ball_incoming()` reads
+*Ball Incoming*; a typo fails with the full option list. `py.typed`
+markers included — mypy/pylance work out of the box.
 
-- Python AST frontend (`graphc/ast_fe.py`): working — real `if/else` via
-  SSA phi-merge, packed arrays, selects, CSE, tennis sensors + controllers,
-  `vec_split`/`vec_make` for component math on vectors.
-- Rust backend (`graphc-rs`): description → game save, 7 golden-desc unit
-  tests green (`cargo test --lib`).
-- CI: compiled graphs replay in the aia_comp-sim VM with pinned assertions
-  (`graphc_poc_demo_replays`, `graphc_tennis_demo_replays`).
-- Parity: serve-latch bot (13 nodes / 27 transitions) duplicates the sim's
-  ServeAimHint latch — see `examples/demo_serve_latch.py`.
-- Next: whatever the sim parity work demands. Rust *source* frontend is
-  shelved; Lua is a documented option, unbuilt.
+## Organizing bigger bots
+
+Split across files freely — every function inlines at its call sites, so
+the output is identical to one flat script:
+```
+mybot/
+  entry.py      # tick() + strategy
+  aim.py        # def serve_aim_x(api): ...
+  consts.py     # SECOND_SERVE_SHORTEN = 0.5
+```
+Rules: one `tick(api)`, helpers return one float each, numeric constants
+at top level, no `while`/`for` (state lives across ticks in latches).
+
+## Under the hood (only if you care)
+
+- `graphc/ast_fe.py`: Python AST -> description IR (SSA phi-merge for
+  `if/else`, inlining, whitelist, `-O` DCE/select-fold; no arithmetic
+  folding, float bit-identity kept).
+- `graphc/desc.py`: language-neutral IR + (game, version) gates.
+- `graphc-rs` (Rust): IR -> game save JSON, port tables pinned from
+  AIGamePyLibrary, cost = **per-tick node transitions** (C# traversal
+  overhead, not FLOPs), layered grid-snapped editor layout so the graph
+  reads left-to-right like the code.
+- `aia_comp-sim` (sibling repo): headless VM replays every compiled save
+  in CI before it ever touches the game.
+
+Targets: `("tennis", "v15f")` (latest), `("tennis", "v0.14")`,
+`("soccer", "v0.12")`, `("universal", version)` raw-only. v15f nodes are
+assumed v0.14-identical until measured.
 
 ## Dev setup
 
-- `GRAPHC_PYLIB` env var points at the AIGamePyLibrary checkout (the
-  game-save emitter); defaults to `C:\gitProjects\AIA_tennis\AIGamePyLibrary`.
-- Run the demo: `python examples/demo_soccer.py` (PYTHONPATH=repo root).
+- `GRAPHC_PYLIB` points at the AIGamePyLibrary checkout (sensor ABI);
+  defaults to `C:\gitProjects\AIA_tennis\AIGamePyLibrary`.
+- Regenerate stubs: `python graphc/api/gen_api.py`.
+- Tests: `cargo test --lib` (backend, 8 green). Python batteries live in
+  the sim session; the 30-misuse battery is `idiot.py` there.
+- Example rival bot: `examples/serve_latch_proj/` -> `graphc_rival.txt`
+  (17 nodes, 36 transitions, beats aia3 7-0 in sim).

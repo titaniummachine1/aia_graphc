@@ -46,7 +46,13 @@ _TENNIS_GET_NODES = {
 #: any version) is the raw-emission fallback: no game API, only const /
 #: arithmetic / vars / arrays. Anything else fails loudly at trace time
 #: AND in the backend — version strings are never silently accepted.
-SUPPORTED_TARGETS = frozenset({("soccer", "v0.12"), ("tennis", "v0.14")})
+#: ("tennis","v15f") is accepted with v0.14-identical nodes (assumed until
+#: measured — user directive 2026-09-11); it is also the tennis LATEST.
+SUPPORTED_TARGETS = frozenset({("soccer", "v0.12"), ("tennis", "v0.14"),
+                               ("tennis", "v15f")})
+
+#: Game -> latest version string.
+LATEST_TARGETS = {"tennis": "v15f", "soccer": "v0.12"}
 
 
 def check_target(target: tuple[str, str]) -> None:
@@ -72,10 +78,16 @@ def check_target(target: tuple[str, str]) -> None:
     )
 
 
-def tennis_sensor_index(kind: str, label: str) -> tuple[int, str]:
-    """Dropdown label -> builder-order index (what graph JSON modifiers mean)."""
+def tennis_sensor_index(kind: str, label: str, version: str = "v0.14") -> tuple[int, str]:
+    """Dropdown label -> builder-order index (what graph JSON modifiers mean).
+
+    v15f resolves through the v0.14 tables (assumed node-identical until
+    measured). Unknown versions fail loudly.
+    """
     from AIGamePyLibrary.data import DROPDOWN_OPTIONS
 
+    if version not in ("v0.14", "v15f"):
+        raise KeyError(f"unknown tennis sensor tables for version {version!r}")
     node = _TENNIS_GET_NODES.get(kind)
     if node is None:
         raise KeyError(f"unknown tennis sensor kind {kind!r}")

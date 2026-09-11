@@ -1,12 +1,14 @@
-"""Author API for target ('tennis', 'v0.14') — GENERATED, do not edit.
+"""Author API for target ('tennis', 'v15f') — GENERATED, do not edit.
+
+Assumed node-identical to v0.14 until measured.
 
 Import this in bot projects instead of raw api.* strings:
-    import AIA_Comp_Libry.tennis.v014 as t
+    import AIA_Comp_Libry.tennis.v15f as t
 The compiler maps these to the same ops as the api.* calls.
 """
 from __future__ import annotations
 
-TARGET = ('tennis', 'v0.14')
+TARGET = ('tennis', 'v15f')
 
 _SENSORS = {
     'ball': ('transform', 'Ball'),

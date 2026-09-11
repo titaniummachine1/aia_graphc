@@ -257,11 +257,12 @@ impl std::fmt::Debug for CompileReport {
 /// strings are never silently accepted (tennis v0.12 vs v0.14 differ).
 fn check_target(game: &str, version: &str) -> Result<(), String> {
     match (game, version) {
-        ("soccer", "v0.12") | ("tennis", "v0.14") => Ok(()),
+        ("soccer", "v0.12") | ("tennis", "v0.14") | ("tennis", "v15f") => Ok(()),
         ("universal", _) => Ok(()),
         _ => Err(format!(
             "unknown target (\"{game}\", \"{version}\") — supported: \
              (\"soccer\", \"v0.12\"), (\"tennis\", \"v0.14\"), \
+             (\"tennis\", \"v15f\"), \
              (\"universal\", <version>) raw-only"
         )),
     }

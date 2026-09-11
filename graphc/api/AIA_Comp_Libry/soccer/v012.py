@@ -186,707 +186,709 @@ _SENSORS = {
     'upper_midfield': ('vector3', 'Upper Midfield'),
 }
 
+__all__ = ['backwards_clear_direction_from_team_carrier', 'ball', 'ball_carrier_shot_charge', 'ball_carrier_stamina', 'ball_on_opponent_side', 'ball_on_team_side', 'ball_speed', 'ball_velocity', 'center_field', 'clear_direction_from_team_carrier', 'clear_direction_from_team_carrier_avoid_all_walls', 'clear_direction_from_team_carrier_avoid_goal_lines', 'clear_direction_from_team_carrier_avoid_sidelines', 'clear_direction_from_teammate_1', 'clear_direction_from_teammate_2', 'clear_direction_from_teammate_3', 'clear_direction_from_teammate_4', 'current_simulation_time', 'delta_time', 'direction_of_ball_from_opponent_1', 'direction_of_ball_from_opponent_2', 'direction_of_ball_from_opponent_3', 'direction_of_ball_from_opponent_4', 'direction_of_ball_from_teammate_1', 'direction_of_ball_from_teammate_2', 'direction_of_ball_from_teammate_3', 'direction_of_ball_from_teammate_4', 'direction_of_clear_teammate_from_opponent_1', 'direction_of_clear_teammate_from_opponent_2', 'direction_of_clear_teammate_from_opponent_3', 'direction_of_clear_teammate_from_opponent_4', 'direction_of_clear_teammate_from_teammate_1', 'direction_of_clear_teammate_from_teammate_2', 'direction_of_clear_teammate_from_teammate_3', 'direction_of_clear_teammate_from_teammate_4', 'direction_of_opponent_goal_from_teammate_1', 'direction_of_opponent_goal_from_teammate_2', 'direction_of_opponent_goal_from_teammate_3', 'direction_of_opponent_goal_from_teammate_4', 'direction_of_team_goal_from_teammate_1', 'direction_of_team_goal_from_teammate_2', 'direction_of_team_goal_from_teammate_3', 'direction_of_team_goal_from_teammate_4', 'direction_of_teammate_from_team_player_1', 'direction_of_teammate_from_team_player_2', 'direction_of_teammate_from_team_player_3', 'direction_of_teammate_from_team_player_4', 'distance_from_team_player_1_to_nearest_opponent', 'distance_from_team_player_2_to_nearest_opponent', 'distance_from_team_player_3_to_nearest_opponent', 'distance_from_team_player_4_to_nearest_opponent', 'field_depth', 'field_width', 'fixed_delta_time', 'get_furthest_open_opponent', 'get_furthest_open_teammate', 'get_most_open_opponent', 'get_most_open_teammate', 'get_nearest_open_opponent', 'get_nearest_open_teammate', 'goal_height', 'goal_width', 'is_active_graph', 'is_away_team', 'is_ball_headed_towards_opponent_goal', 'is_ball_headed_towards_team_goal', 'is_ball_loose', 'is_ball_nearby_opponent_player_1', 'is_ball_nearby_opponent_player_2', 'is_ball_nearby_opponent_player_3', 'is_ball_nearby_opponent_player_4', 'is_ball_nearby_team_player_1', 'is_ball_nearby_team_player_2', 'is_ball_nearby_team_player_3', 'is_ball_nearby_team_player_4', 'is_home_team', 'is_kickoff', 'is_opponent_kicking_off', 'is_opponent_player_1_closest_opponent_to_ball', 'is_opponent_player_1_open', 'is_opponent_player_2_closest_opponent_to_ball', 'is_opponent_player_2_open', 'is_opponent_player_3_closest_opponent_to_ball', 'is_opponent_player_3_open', 'is_opponent_player_4_closest_opponent_to_ball', 'is_opponent_player_4_open', 'is_team_kicking_off', 'is_team_player_1_closest_teammate_to_ball', 'is_team_player_1_open', 'is_team_player_2_closest_teammate_to_ball', 'is_team_player_2_open', 'is_team_player_3_closest_teammate_to_ball', 'is_team_player_3_open', 'is_team_player_4_closest_teammate_to_ball', 'is_team_player_4_open', 'kickoff_circle_radius', 'lower_corner_away_side', 'lower_corner_home_side', 'lower_corner_opposing_side', 'lower_corner_team_side', 'lower_midfield', 'max_simulation_time', 'opponent_attacking', 'opponent_goal_center', 'opponent_goal_left_post', 'opponent_goal_right_post', 'opponent_has_ball', 'opponent_is_winning', 'opponent_nearest_opponent_goal', 'opponent_nearest_team_goal', 'opponent_nearest_team_player_1', 'opponent_nearest_team_player_2', 'opponent_nearest_team_player_3', 'opponent_nearest_team_player_4', 'opponent_nearest_teammate_player_1_stamina', 'opponent_nearest_teammate_player_2_stamina', 'opponent_nearest_teammate_player_3_stamina', 'opponent_nearest_teammate_player_4_stamina', 'opponent_player_1', 'opponent_player_1_has_ball', 'opponent_player_1_stamina', 'opponent_player_2', 'opponent_player_2_has_ball', 'opponent_player_2_stamina', 'opponent_player_3', 'opponent_player_3_has_ball', 'opponent_player_3_stamina', 'opponent_player_4', 'opponent_player_4_has_ball', 'opponent_player_4_stamina', 'opponent_possession', 'opponent_score', 'opponent_scored_last_point', 'opponent_shots', 'pi', 'player_interact_radius', 'simulation_time_remaining', 'stamina_of_last_defending_opponent', 'team_attacking', 'team_goal_center', 'team_goal_left_post', 'team_goal_right_post', 'team_has_ball', 'team_is_winning', 'team_player_1', 'team_player_1_has_ball', 'team_player_1_stamina', 'team_player_2', 'team_player_2_has_ball', 'team_player_2_stamina', 'team_player_3', 'team_player_3_has_ball', 'team_player_3_stamina', 'team_player_4', 'team_player_4_has_ball', 'team_player_4_stamina', 'team_possession', 'team_score', 'team_scored_last_point', 'team_shots', 'teammate_1_shot_charge', 'teammate_2_shot_charge', 'teammate_3_shot_charge', 'teammate_4_shot_charge', 'teammate_nearest_opponent_goal', 'teammate_nearest_team_goal', 'teammate_nearest_team_player_1', 'teammate_nearest_team_player_2', 'teammate_nearest_team_player_3', 'teammate_nearest_team_player_4', 'upper_corner_away_side', 'upper_corner_home_side', 'upper_corner_opposing_side', 'upper_corner_team_side', 'upper_midfield', 'move']
+
 def backwards_clear_direction_from_team_carrier() -> object:
-    """Sensor 'Backwards clear direction from team carrier' (vector3). Compile-time only."""
+    """Clear backwards for the carrier. Game label: 'Backwards clear direction from team carrier'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball() -> object:
-    """Sensor 'Ball' (transform). Compile-time only."""
+    """Ball position. Game label: 'Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_carrier_shot_charge() -> float:
-    """Sensor 'Ball Carrier Shot Charge' (float). Compile-time only."""
+    """Shot charge of whoever holds the ball. Game label: 'Ball Carrier Shot Charge'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_carrier_stamina() -> float:
-    """Sensor 'Ball Carrier Stamina' (float). Compile-time only."""
+    """Stamina of whoever holds the ball. Game label: 'Ball Carrier Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_on_opponent_side() -> bool:
-    """Sensor 'Ball On Opponent Side' (bool). Compile-time only."""
+    """True when the ball is on their half. Game label: 'Ball On Opponent Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_on_team_side() -> bool:
-    """Sensor 'Ball On Team Side' (bool). Compile-time only."""
+    """True when the ball is on your half. Game label: 'Ball On Team Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_speed() -> float:
-    """Sensor 'Ball Speed' (float). Compile-time only."""
+    """Current ball speed. Game label: 'Ball Speed'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_velocity() -> object:
-    """Sensor 'Ball Velocity' (vector3). Compile-time only."""
+    """Ball velocity vector. Game label: 'Ball Velocity'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def center_field() -> object:
-    """Sensor 'Center Field' (vector3). Compile-time only."""
+    """Center spot. Game label: 'Center Field'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def clear_direction_from_team_carrier() -> object:
-    """Sensor 'Clear direction from team carrier' (vector3). Compile-time only."""
+    """Safe clear direction for the carrier. Game label: 'Clear direction from team carrier'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def clear_direction_from_team_carrier_avoid_all_walls() -> object:
-    """Sensor 'Clear direction from team carrier (avoid all walls)' (vector3). Compile-time only."""
+    """Clear that stays in play. Game label: 'Clear direction from team carrier (avoid all walls)'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def clear_direction_from_team_carrier_avoid_goal_lines() -> object:
-    """Sensor 'Clear direction from team carrier (avoid goal lines)' (vector3). Compile-time only."""
+    """Clear that stays in play past the lines. Game label: 'Clear direction from team carrier (avoid goal lines)'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def clear_direction_from_team_carrier_avoid_sidelines() -> object:
-    """Sensor 'Clear direction from team carrier (avoid sidelines)' (vector3). Compile-time only."""
+    """Clear that stays in past the sidelines. Game label: 'Clear direction from team carrier (avoid sidelines)'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def clear_direction_from_teammate_1() -> object:
-    """Sensor 'Clear direction from Teammate 1' (vector3). Compile-time only."""
+    """Safe clear direction for teammate 1. Game label: 'Clear direction from Teammate 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def clear_direction_from_teammate_2() -> object:
-    """Sensor 'Clear direction from Teammate 2' (vector3). Compile-time only."""
+    """Safe clear direction for teammate 2. Game label: 'Clear direction from Teammate 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def clear_direction_from_teammate_3() -> object:
-    """Sensor 'Clear direction from Teammate 3' (vector3). Compile-time only."""
+    """Safe clear direction for teammate 3. Game label: 'Clear direction from Teammate 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def clear_direction_from_teammate_4() -> object:
-    """Sensor 'Clear direction from Teammate 4' (vector3). Compile-time only."""
+    """Safe clear direction for teammate 4. Game label: 'Clear direction from Teammate 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def current_simulation_time() -> float:
-    """Sensor 'Current Simulation Time' (float). Compile-time only."""
+    """Match clock in seconds. Game label: 'Current Simulation Time'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def delta_time() -> float:
-    """Sensor 'Delta Time' (float). Compile-time only."""
+    """Frame delta in seconds. Game label: 'Delta Time'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_ball_from_opponent_1() -> object:
-    """Sensor 'Direction of ball from Opponent 1' (vector3). Compile-time only."""
+    """Ball direction seen from opponent 1. Game label: 'Direction of ball from Opponent 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_ball_from_opponent_2() -> object:
-    """Sensor 'Direction of ball from Opponent 2' (vector3). Compile-time only."""
+    """Ball direction seen from opponent 2. Game label: 'Direction of ball from Opponent 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_ball_from_opponent_3() -> object:
-    """Sensor 'Direction of ball from Opponent 3' (vector3). Compile-time only."""
+    """Ball direction seen from opponent 3. Game label: 'Direction of ball from Opponent 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_ball_from_opponent_4() -> object:
-    """Sensor 'Direction of ball from Opponent 4' (vector3). Compile-time only."""
+    """Ball direction seen from opponent 4. Game label: 'Direction of ball from Opponent 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_ball_from_teammate_1() -> object:
-    """Sensor 'Direction of ball from Teammate 1' (vector3). Compile-time only."""
+    """Ball direction seen from teammate 1. Game label: 'Direction of ball from Teammate 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_ball_from_teammate_2() -> object:
-    """Sensor 'Direction of ball from Teammate 2' (vector3). Compile-time only."""
+    """Ball direction seen from teammate 2. Game label: 'Direction of ball from Teammate 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_ball_from_teammate_3() -> object:
-    """Sensor 'Direction of ball from Teammate 3' (vector3). Compile-time only."""
+    """Ball direction seen from teammate 3. Game label: 'Direction of ball from Teammate 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_ball_from_teammate_4() -> object:
-    """Sensor 'Direction of ball from Teammate 4' (vector3). Compile-time only."""
+    """Ball direction seen from teammate 4. Game label: 'Direction of ball from Teammate 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_clear_teammate_from_opponent_1() -> object:
-    """Sensor 'Direction of clear teammate from Opponent 1' (vector3). Compile-time only."""
+    """Where opponent 1 would clear to find a teammate. Game label: 'Direction of clear teammate from Opponent 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_clear_teammate_from_opponent_2() -> object:
-    """Sensor 'Direction of clear teammate from Opponent 2' (vector3). Compile-time only."""
+    """Where opponent 2 would clear to find a teammate. Game label: 'Direction of clear teammate from Opponent 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_clear_teammate_from_opponent_3() -> object:
-    """Sensor 'Direction of clear teammate from Opponent 3' (vector3). Compile-time only."""
+    """Where opponent 3 would clear to find a teammate. Game label: 'Direction of clear teammate from Opponent 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_clear_teammate_from_opponent_4() -> object:
-    """Sensor 'Direction of clear teammate from Opponent 4' (vector3). Compile-time only."""
+    """Where opponent 4 would clear to find a teammate. Game label: 'Direction of clear teammate from Opponent 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_clear_teammate_from_teammate_1() -> object:
-    """Sensor 'Direction of clear teammate from Teammate 1' (vector3). Compile-time only."""
+    """Where teammate 1 should clear to find a teammate. Game label: 'Direction of clear teammate from Teammate 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_clear_teammate_from_teammate_2() -> object:
-    """Sensor 'Direction of clear teammate from Teammate 2' (vector3). Compile-time only."""
+    """Where teammate 2 should clear to find a teammate. Game label: 'Direction of clear teammate from Teammate 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_clear_teammate_from_teammate_3() -> object:
-    """Sensor 'Direction of clear teammate from Teammate 3' (vector3). Compile-time only."""
+    """Where teammate 3 should clear to find a teammate. Game label: 'Direction of clear teammate from Teammate 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_clear_teammate_from_teammate_4() -> object:
-    """Sensor 'Direction of clear teammate from Teammate 4' (vector3). Compile-time only."""
+    """Where teammate 4 should clear to find a teammate. Game label: 'Direction of clear teammate from Teammate 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_opponent_goal_from_teammate_1() -> object:
-    """Sensor 'Direction of opponent goal from Teammate 1' (vector3). Compile-time only."""
+    """Their-goal direction from teammate 1. Game label: 'Direction of opponent goal from Teammate 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_opponent_goal_from_teammate_2() -> object:
-    """Sensor 'Direction of opponent goal from Teammate 2' (vector3). Compile-time only."""
+    """Their-goal direction from teammate 2. Game label: 'Direction of opponent goal from Teammate 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_opponent_goal_from_teammate_3() -> object:
-    """Sensor 'Direction of opponent goal from Teammate 3' (vector3). Compile-time only."""
+    """Their-goal direction from teammate 3. Game label: 'Direction of opponent goal from Teammate 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_opponent_goal_from_teammate_4() -> object:
-    """Sensor 'Direction of opponent goal from Teammate 4' (vector3). Compile-time only."""
+    """Their-goal direction from teammate 4. Game label: 'Direction of opponent goal from Teammate 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_team_goal_from_teammate_1() -> object:
-    """Sensor 'Direction of team goal from Teammate 1' (vector3). Compile-time only."""
+    """Own-goal direction from teammate 1. Game label: 'Direction of team goal from Teammate 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_team_goal_from_teammate_2() -> object:
-    """Sensor 'Direction of team goal from Teammate 2' (vector3). Compile-time only."""
+    """Own-goal direction from teammate 2. Game label: 'Direction of team goal from Teammate 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_team_goal_from_teammate_3() -> object:
-    """Sensor 'Direction of team goal from Teammate 3' (vector3). Compile-time only."""
+    """Own-goal direction from teammate 3. Game label: 'Direction of team goal from Teammate 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_team_goal_from_teammate_4() -> object:
-    """Sensor 'Direction of team goal from Teammate 4' (vector3). Compile-time only."""
+    """Own-goal direction from teammate 4. Game label: 'Direction of team goal from Teammate 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_teammate_from_team_player_1() -> object:
-    """Sensor 'Direction of teammate from Team Player 1' (vector3). Compile-time only."""
+    """Pass direction from team player 1. Game label: 'Direction of teammate from Team Player 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_teammate_from_team_player_2() -> object:
-    """Sensor 'Direction of teammate from Team Player 2' (vector3). Compile-time only."""
+    """Pass direction from team player 2. Game label: 'Direction of teammate from Team Player 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_teammate_from_team_player_3() -> object:
-    """Sensor 'Direction of teammate from Team Player 3' (vector3). Compile-time only."""
+    """Pass direction from team player 3. Game label: 'Direction of teammate from Team Player 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def direction_of_teammate_from_team_player_4() -> object:
-    """Sensor 'Direction of teammate from Team Player 4' (vector3). Compile-time only."""
+    """Pass direction from team player 4. Game label: 'Direction of teammate from Team Player 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def distance_from_team_player_1_to_nearest_opponent() -> float:
-    """Sensor 'Distance from Team Player 1 to nearest Opponent' (float). Compile-time only."""
+    """How much space team player 1 has. Game label: 'Distance from Team Player 1 to nearest Opponent'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def distance_from_team_player_2_to_nearest_opponent() -> float:
-    """Sensor 'Distance from Team Player 2 to nearest Opponent' (float). Compile-time only."""
+    """How much space team player 2 has. Game label: 'Distance from Team Player 2 to nearest Opponent'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def distance_from_team_player_3_to_nearest_opponent() -> float:
-    """Sensor 'Distance from Team Player 3 to nearest Opponent' (float). Compile-time only."""
+    """How much space team player 3 has. Game label: 'Distance from Team Player 3 to nearest Opponent'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def distance_from_team_player_4_to_nearest_opponent() -> float:
-    """Sensor 'Distance from Team Player 4 to nearest Opponent' (float). Compile-time only."""
+    """How much space team player 4 has. Game label: 'Distance from Team Player 4 to nearest Opponent'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def field_depth() -> float:
-    """Sensor 'Field Depth' (float). Compile-time only."""
+    """Playable field length. Game label: 'Field Depth'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def field_width() -> float:
-    """Sensor 'Field Width' (float). Compile-time only."""
+    """Playable field width. Game label: 'Field Width'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def fixed_delta_time() -> float:
-    """Sensor 'Fixed Delta Time' (float). Compile-time only."""
+    """Physics tick delta in seconds. Game label: 'Fixed Delta Time'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def get_furthest_open_opponent() -> object:
-    """Sensor 'Get furthest open opponent' (vector3). Compile-time only."""
+    """Position of the furthest open opponent. Game label: 'Get furthest open opponent'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def get_furthest_open_teammate() -> object:
-    """Sensor 'Get furthest open teammate' (vector3). Compile-time only."""
+    """Position of the furthest open teammate. Game label: 'Get furthest open teammate'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def get_most_open_opponent() -> object:
-    """Sensor 'Get most open opponent' (vector3). Compile-time only."""
+    """Position of the most open opponent. Game label: 'Get most open opponent'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def get_most_open_teammate() -> object:
-    """Sensor 'Get most open teammate' (vector3). Compile-time only."""
+    """Position of the most open teammate. Game label: 'Get most open teammate'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def get_nearest_open_opponent() -> object:
-    """Sensor 'Get nearest open opponent' (vector3). Compile-time only."""
+    """Position of the nearest open opponent. Game label: 'Get nearest open opponent'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def get_nearest_open_teammate() -> object:
-    """Sensor 'Get nearest open teammate' (vector3). Compile-time only."""
+    """Position of the nearest open teammate. Game label: 'Get nearest open teammate'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def goal_height() -> float:
-    """Sensor 'Goal Height' (float). Compile-time only."""
+    """Goal height. Game label: 'Goal Height'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def goal_width() -> float:
-    """Sensor 'Goal Width' (float). Compile-time only."""
+    """Goal mouth width. Game label: 'Goal Width'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_active_graph() -> bool:
-    """Sensor 'Is Active Graph' (bool). Compile-time only."""
+    """True when this graph is the one driving the player. Game label: 'Is Active Graph'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_away_team() -> bool:
-    """Sensor 'Is Away Team' (bool). Compile-time only."""
+    """True when this brain plays the away team. Game label: 'Is Away Team'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_headed_towards_opponent_goal() -> bool:
-    """Sensor 'Is Ball Headed Towards Opponent Goal' (bool). Compile-time only."""
+    """True when ball velocity aims at their goal. Game label: 'Is Ball Headed Towards Opponent Goal'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_headed_towards_team_goal() -> bool:
-    """Sensor 'Is Ball Headed Towards Team Goal' (bool). Compile-time only."""
+    """True when ball velocity aims at your goal. Game label: 'Is Ball Headed Towards Team Goal'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_loose() -> bool:
-    """Sensor 'Is Ball Loose' (bool). Compile-time only."""
+    """True when nobody holds the ball. Game label: 'Is Ball Loose'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_nearby_opponent_player_1() -> bool:
-    """Sensor 'Is Ball Nearby Opponent Player 1' (bool). Compile-time only."""
+    """True when the ball is near opponent 1. Game label: 'Is Ball Nearby Opponent Player 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_nearby_opponent_player_2() -> bool:
-    """Sensor 'Is Ball Nearby Opponent Player 2' (bool). Compile-time only."""
+    """True when the ball is near opponent 2. Game label: 'Is Ball Nearby Opponent Player 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_nearby_opponent_player_3() -> bool:
-    """Sensor 'Is Ball Nearby Opponent Player 3' (bool). Compile-time only."""
+    """True when the ball is near opponent 3. Game label: 'Is Ball Nearby Opponent Player 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_nearby_opponent_player_4() -> bool:
-    """Sensor 'Is Ball Nearby Opponent Player 4' (bool). Compile-time only."""
+    """True when the ball is near opponent 4. Game label: 'Is Ball Nearby Opponent Player 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_nearby_team_player_1() -> bool:
-    """Sensor 'Is Ball Nearby Team Player 1' (bool). Compile-time only."""
+    """True when the ball is near team player 1. Game label: 'Is Ball Nearby Team Player 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_nearby_team_player_2() -> bool:
-    """Sensor 'Is Ball Nearby Team Player 2' (bool). Compile-time only."""
+    """True when the ball is near team player 2. Game label: 'Is Ball Nearby Team Player 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_nearby_team_player_3() -> bool:
-    """Sensor 'Is Ball Nearby Team Player 3' (bool). Compile-time only."""
+    """True when the ball is near team player 3. Game label: 'Is Ball Nearby Team Player 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_nearby_team_player_4() -> bool:
-    """Sensor 'Is Ball Nearby Team Player 4' (bool). Compile-time only."""
+    """True when the ball is near team player 4. Game label: 'Is Ball Nearby Team Player 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_home_team() -> bool:
-    """Sensor 'Is Home Team' (bool). Compile-time only."""
+    """True when this brain plays the home team. Game label: 'Is Home Team'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_kickoff() -> bool:
-    """Sensor 'Is Kickoff' (bool). Compile-time only."""
+    """True during kickoff setup. Game label: 'Is Kickoff'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_kicking_off() -> bool:
-    """Sensor 'Is Opponent Kicking off' (bool). Compile-time only."""
+    """True when the opponent kicks off. Game label: 'Is Opponent Kicking off'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_player_1_closest_opponent_to_ball() -> bool:
-    """Sensor 'Is Opponent Player 1 Closest Opponent to Ball' (bool). Compile-time only."""
+    """True when opponent 1 is the closest opponent to the ball. Game label: 'Is Opponent Player 1 Closest Opponent to Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_player_1_open() -> bool:
-    """Sensor 'Is Opponent Player 1 Open' (bool). Compile-time only."""
+    """True when opponent 1 has no close marker. Game label: 'Is Opponent Player 1 Open'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_player_2_closest_opponent_to_ball() -> bool:
-    """Sensor 'Is Opponent Player 2 Closest Opponent to Ball' (bool). Compile-time only."""
+    """True when opponent 2 is the closest opponent to the ball. Game label: 'Is Opponent Player 2 Closest Opponent to Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_player_2_open() -> bool:
-    """Sensor 'Is Opponent Player 2 Open' (bool). Compile-time only."""
+    """True when opponent 2 has no close marker. Game label: 'Is Opponent Player 2 Open'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_player_3_closest_opponent_to_ball() -> bool:
-    """Sensor 'Is Opponent Player 3 Closest Opponent to Ball' (bool). Compile-time only."""
+    """True when opponent 3 is the closest opponent to the ball. Game label: 'Is Opponent Player 3 Closest Opponent to Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_player_3_open() -> bool:
-    """Sensor 'Is Opponent Player 3 Open' (bool). Compile-time only."""
+    """True when opponent 3 has no close marker. Game label: 'Is Opponent Player 3 Open'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_player_4_closest_opponent_to_ball() -> bool:
-    """Sensor 'Is Opponent Player 4 Closest Opponent to Ball' (bool). Compile-time only."""
+    """True when opponent 4 is the closest opponent to the ball. Game label: 'Is Opponent Player 4 Closest Opponent to Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_player_4_open() -> bool:
-    """Sensor 'Is Opponent Player 4 Open' (bool). Compile-time only."""
+    """True when opponent 4 has no close marker. Game label: 'Is Opponent Player 4 Open'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_kicking_off() -> bool:
-    """Sensor 'Is Team Kicking off' (bool). Compile-time only."""
+    """True when your team kicks off. Game label: 'Is Team Kicking off'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_player_1_closest_teammate_to_ball() -> bool:
-    """Sensor 'Is Team Player 1 Closest Teammate to Ball' (bool). Compile-time only."""
+    """True when team player 1 is the closest teammate to the ball. Game label: 'Is Team Player 1 Closest Teammate to Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_player_1_open() -> bool:
-    """Sensor 'Is Team Player 1 Open' (bool). Compile-time only."""
+    """True when team player 1 has no close marker. Game label: 'Is Team Player 1 Open'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_player_2_closest_teammate_to_ball() -> bool:
-    """Sensor 'Is Team Player 2 Closest Teammate to Ball' (bool). Compile-time only."""
+    """True when team player 2 is the closest teammate to the ball. Game label: 'Is Team Player 2 Closest Teammate to Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_player_2_open() -> bool:
-    """Sensor 'Is Team Player 2 Open' (bool). Compile-time only."""
+    """True when team player 2 has no close marker. Game label: 'Is Team Player 2 Open'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_player_3_closest_teammate_to_ball() -> bool:
-    """Sensor 'Is Team Player 3 Closest Teammate to Ball' (bool). Compile-time only."""
+    """True when team player 3 is the closest teammate to the ball. Game label: 'Is Team Player 3 Closest Teammate to Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_player_3_open() -> bool:
-    """Sensor 'Is Team Player 3 Open' (bool). Compile-time only."""
+    """True when team player 3 has no close marker. Game label: 'Is Team Player 3 Open'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_player_4_closest_teammate_to_ball() -> bool:
-    """Sensor 'Is Team Player 4 Closest Teammate to Ball' (bool). Compile-time only."""
+    """True when team player 4 is the closest teammate to the ball. Game label: 'Is Team Player 4 Closest Teammate to Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_team_player_4_open() -> bool:
-    """Sensor 'Is Team Player 4 Open' (bool). Compile-time only."""
+    """True when team player 4 has no close marker. Game label: 'Is Team Player 4 Open'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def kickoff_circle_radius() -> float:
-    """Sensor 'Kickoff Circle Radius' (float). Compile-time only."""
+    """Center circle radius. Game label: 'Kickoff Circle Radius'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def lower_corner_away_side() -> object:
-    """Sensor 'Lower Corner Away Side' (vector3). Compile-time only."""
+    """Corner position, away side lower. Game label: 'Lower Corner Away Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def lower_corner_home_side() -> object:
-    """Sensor 'Lower Corner Home Side' (vector3). Compile-time only."""
+    """Corner position, home side lower. Game label: 'Lower Corner Home Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def lower_corner_opposing_side() -> object:
-    """Sensor 'Lower Corner Opposing Side' (vector3). Compile-time only."""
+    """Opposing corner, lower. Game label: 'Lower Corner Opposing Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def lower_corner_team_side() -> object:
-    """Sensor 'Lower Corner Team Side' (vector3). Compile-time only."""
+    """Team corner, lower. Game label: 'Lower Corner Team Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def lower_midfield() -> object:
-    """Sensor 'Lower Midfield' (vector3). Compile-time only."""
+    """Midfield position, lower. Game label: 'Lower Midfield'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def max_simulation_time() -> float:
-    """Sensor 'Max Simulation Time' (float). Compile-time only."""
+    """Match length in seconds. Game label: 'Max Simulation Time'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_attacking() -> float:
-    """Sensor 'Opponent Attacking %' (float). Compile-time only."""
+    """Share of opponent play in attack 0-1. Game label: 'Opponent Attacking %'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_goal_center() -> object:
-    """Sensor 'Opponent Goal Center' (transform). Compile-time only."""
+    """Middle of their goal. Game label: 'Opponent Goal Center'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_goal_left_post() -> object:
-    """Sensor 'Opponent Goal Left Post' (transform). Compile-time only."""
+    """Their left post. Game label: 'Opponent Goal Left Post'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_goal_right_post() -> object:
-    """Sensor 'Opponent Goal Right Post' (transform). Compile-time only."""
+    """Their right post. Game label: 'Opponent Goal Right Post'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_has_ball() -> bool:
-    """Sensor 'Opponent Has Ball' (bool). Compile-time only."""
+    """True when an opponent holds the ball. Game label: 'Opponent Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_is_winning() -> bool:
-    """Sensor 'Opponent Is Winning' (bool). Compile-time only."""
+    """True when the opponent leads. Game label: 'Opponent Is Winning'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_opponent_goal() -> object:
-    """Sensor 'Opponent Nearest Opponent Goal' (transform). Compile-time only."""
+    """Opponent closest to their goal. Game label: 'Opponent Nearest Opponent Goal'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_team_goal() -> object:
-    """Sensor 'Opponent Nearest Team Goal' (transform). Compile-time only."""
+    """Opponent closest to your goal. Game label: 'Opponent Nearest Team Goal'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_team_player_1() -> object:
-    """Sensor 'Opponent Nearest Team Player 1' (transform). Compile-time only."""
+    """Opponent closest to your player 1. Game label: 'Opponent Nearest Team Player 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_team_player_2() -> object:
-    """Sensor 'Opponent Nearest Team Player 2' (transform). Compile-time only."""
+    """Opponent closest to your player 2. Game label: 'Opponent Nearest Team Player 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_team_player_3() -> object:
-    """Sensor 'Opponent Nearest Team Player 3' (transform). Compile-time only."""
+    """Opponent closest to your player 3. Game label: 'Opponent Nearest Team Player 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_team_player_4() -> object:
-    """Sensor 'Opponent Nearest Team Player 4' (transform). Compile-time only."""
+    """Opponent closest to your player 4. Game label: 'Opponent Nearest Team Player 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_teammate_player_1_stamina() -> float:
-    """Sensor 'Opponent Nearest Teammate Player 1 Stamina' (float). Compile-time only."""
+    """Stamina of the opponent nearest your player 1. Game label: 'Opponent Nearest Teammate Player 1 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_teammate_player_2_stamina() -> float:
-    """Sensor 'Opponent Nearest Teammate Player 2 Stamina' (float). Compile-time only."""
+    """Stamina of the opponent nearest your player 2. Game label: 'Opponent Nearest Teammate Player 2 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_teammate_player_3_stamina() -> float:
-    """Sensor 'Opponent Nearest Teammate Player 3 Stamina' (float). Compile-time only."""
+    """Stamina of the opponent nearest your player 3. Game label: 'Opponent Nearest Teammate Player 3 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_nearest_teammate_player_4_stamina() -> float:
-    """Sensor 'Opponent Nearest Teammate Player 4 Stamina' (float). Compile-time only."""
+    """Stamina of the opponent nearest your player 4. Game label: 'Opponent Nearest Teammate Player 4 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_1() -> object:
-    """Sensor 'Opponent Player 1' (transform). Compile-time only."""
+    """Position of opponent 1. Game label: 'Opponent Player 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_1_has_ball() -> bool:
-    """Sensor 'Opponent Player 1 Has Ball' (bool). Compile-time only."""
+    """True when opponent 1 holds the ball. Game label: 'Opponent Player 1 Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_1_stamina() -> float:
-    """Sensor 'Opponent Player 1 Stamina' (float). Compile-time only."""
+    """Stamina of opponent 1. Game label: 'Opponent Player 1 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_2() -> object:
-    """Sensor 'Opponent Player 2' (transform). Compile-time only."""
+    """Position of opponent 2. Game label: 'Opponent Player 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_2_has_ball() -> bool:
-    """Sensor 'Opponent Player 2 Has Ball' (bool). Compile-time only."""
+    """True when opponent 2 holds the ball. Game label: 'Opponent Player 2 Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_2_stamina() -> float:
-    """Sensor 'Opponent Player 2 Stamina' (float). Compile-time only."""
+    """Stamina of opponent 2. Game label: 'Opponent Player 2 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_3() -> object:
-    """Sensor 'Opponent Player 3' (transform). Compile-time only."""
+    """Position of opponent 3. Game label: 'Opponent Player 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_3_has_ball() -> bool:
-    """Sensor 'Opponent Player 3 Has Ball' (bool). Compile-time only."""
+    """True when opponent 3 holds the ball. Game label: 'Opponent Player 3 Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_3_stamina() -> float:
-    """Sensor 'Opponent Player 3 Stamina' (float). Compile-time only."""
+    """Stamina of opponent 3. Game label: 'Opponent Player 3 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_4() -> object:
-    """Sensor 'Opponent Player 4' (transform). Compile-time only."""
+    """Position of opponent 4. Game label: 'Opponent Player 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_4_has_ball() -> bool:
-    """Sensor 'Opponent Player 4 Has Ball' (bool). Compile-time only."""
+    """True when opponent 4 holds the ball. Game label: 'Opponent Player 4 Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_player_4_stamina() -> float:
-    """Sensor 'Opponent Player 4 Stamina' (float). Compile-time only."""
+    """Stamina of opponent 4. Game label: 'Opponent Player 4 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_possession() -> float:
-    """Sensor 'Opponent Possession %' (float). Compile-time only."""
+    """Opponent possession share 0-1. Game label: 'Opponent Possession %'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_score() -> float:
-    """Sensor 'Opponent Score' (float). Compile-time only."""
+    """Opponent goals. Game label: 'Opponent Score'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_scored_last_point() -> bool:
-    """Sensor 'Opponent Scored Last Point' (bool). Compile-time only."""
+    """True when the opponent scored last. Game label: 'Opponent Scored Last Point'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_shots() -> float:
-    """Sensor 'Opponent Shots' (float). Compile-time only."""
+    """Opponent shot count. Game label: 'Opponent Shots'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def pi() -> float:
-    """Sensor 'Pi' (float). Compile-time only."""
+    """3.14159. Game label: 'Pi'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def player_interact_radius() -> float:
-    """Sensor 'Player Interact Radius' (float). Compile-time only."""
+    """How close a player must be to touch the ball. Game label: 'Player Interact Radius'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def simulation_time_remaining() -> float:
-    """Sensor 'Simulation Time Remaining' (float). Compile-time only."""
+    """Seconds left on the clock. Game label: 'Simulation Time Remaining'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def stamina_of_last_defending_opponent() -> float:
-    """Sensor 'Stamina of last defending opponent' (float). Compile-time only."""
+    """Stamina of the last defender. Game label: 'Stamina of last defending opponent'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_attacking() -> float:
-    """Sensor 'Team Attacking %' (float). Compile-time only."""
+    """Share of your play in attack 0-1. Game label: 'Team Attacking %'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_goal_center() -> object:
-    """Sensor 'Team Goal Center' (transform). Compile-time only."""
+    """Middle of your goal. Game label: 'Team Goal Center'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_goal_left_post() -> object:
-    """Sensor 'Team Goal Left Post' (transform). Compile-time only."""
+    """Your left post. Game label: 'Team Goal Left Post'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_goal_right_post() -> object:
-    """Sensor 'Team Goal Right Post' (transform). Compile-time only."""
+    """Your right post. Game label: 'Team Goal Right Post'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_has_ball() -> bool:
-    """Sensor 'Team Has Ball' (bool). Compile-time only."""
+    """True when a teammate (or you) holds the ball. Game label: 'Team Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_is_winning() -> bool:
-    """Sensor 'Team Is Winning' (bool). Compile-time only."""
+    """True when your team leads. Game label: 'Team Is Winning'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_1() -> object:
-    """Sensor 'Team Player 1' (transform). Compile-time only."""
+    """Position of team player 1. Game label: 'Team Player 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_1_has_ball() -> bool:
-    """Sensor 'Team Player 1 Has Ball' (bool). Compile-time only."""
+    """True when team player 1 holds the ball. Game label: 'Team Player 1 Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_1_stamina() -> float:
-    """Sensor 'Team Player 1 Stamina' (float). Compile-time only."""
+    """Stamina of team player 1. Game label: 'Team Player 1 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_2() -> object:
-    """Sensor 'Team Player 2' (transform). Compile-time only."""
+    """Position of team player 2. Game label: 'Team Player 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_2_has_ball() -> bool:
-    """Sensor 'Team Player 2 Has Ball' (bool). Compile-time only."""
+    """True when team player 2 holds the ball. Game label: 'Team Player 2 Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_2_stamina() -> float:
-    """Sensor 'Team Player 2 Stamina' (float). Compile-time only."""
+    """Stamina of team player 2. Game label: 'Team Player 2 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_3() -> object:
-    """Sensor 'Team Player 3' (transform). Compile-time only."""
+    """Position of team player 3. Game label: 'Team Player 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_3_has_ball() -> bool:
-    """Sensor 'Team Player 3 Has Ball' (bool). Compile-time only."""
+    """True when team player 3 holds the ball. Game label: 'Team Player 3 Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_3_stamina() -> float:
-    """Sensor 'Team Player 3 Stamina' (float). Compile-time only."""
+    """Stamina of team player 3. Game label: 'Team Player 3 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_4() -> object:
-    """Sensor 'Team Player 4' (transform). Compile-time only."""
+    """Position of team player 4. Game label: 'Team Player 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_4_has_ball() -> bool:
-    """Sensor 'Team Player 4 Has Ball' (bool). Compile-time only."""
+    """True when team player 4 holds the ball. Game label: 'Team Player 4 Has Ball'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_player_4_stamina() -> float:
-    """Sensor 'Team Player 4 Stamina' (float). Compile-time only."""
+    """Stamina of team player 4. Game label: 'Team Player 4 Stamina'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_possession() -> float:
-    """Sensor 'Team Possession %' (float). Compile-time only."""
+    """Your possession share 0-1. Game label: 'Team Possession %'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_score() -> float:
-    """Sensor 'Team Score' (float). Compile-time only."""
+    """Your team goals. Game label: 'Team Score'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_scored_last_point() -> bool:
-    """Sensor 'Team Scored Last Point' (bool). Compile-time only."""
+    """True when your team scored last. Game label: 'Team Scored Last Point'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def team_shots() -> float:
-    """Sensor 'Team Shots' (float). Compile-time only."""
+    """Your team shot count. Game label: 'Team Shots'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_1_shot_charge() -> float:
-    """Sensor 'Teammate 1 Shot Charge' (float). Compile-time only."""
+    """Shot charge of teammate 1. Game label: 'Teammate 1 Shot Charge'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_2_shot_charge() -> float:
-    """Sensor 'Teammate 2 Shot Charge' (float). Compile-time only."""
+    """Shot charge of teammate 2. Game label: 'Teammate 2 Shot Charge'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_3_shot_charge() -> float:
-    """Sensor 'Teammate 3 Shot Charge' (float). Compile-time only."""
+    """Shot charge of teammate 3. Game label: 'Teammate 3 Shot Charge'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_4_shot_charge() -> float:
-    """Sensor 'Teammate 4 Shot Charge' (float). Compile-time only."""
+    """Shot charge of teammate 4. Game label: 'Teammate 4 Shot Charge'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_nearest_opponent_goal() -> object:
-    """Sensor 'Teammate Nearest Opponent Goal' (transform). Compile-time only."""
+    """Teammate closest to their goal. Game label: 'Teammate Nearest Opponent Goal'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_nearest_team_goal() -> object:
-    """Sensor 'Teammate Nearest Team Goal' (transform). Compile-time only."""
+    """Teammate closest to your goal. Game label: 'Teammate Nearest Team Goal'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_nearest_team_player_1() -> object:
-    """Sensor 'Teammate Nearest Team Player 1' (transform). Compile-time only."""
+    """Teammate closest to your player 1. Game label: 'Teammate Nearest Team Player 1'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_nearest_team_player_2() -> object:
-    """Sensor 'Teammate Nearest Team Player 2' (transform). Compile-time only."""
+    """Teammate closest to your player 2. Game label: 'Teammate Nearest Team Player 2'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_nearest_team_player_3() -> object:
-    """Sensor 'Teammate Nearest Team Player 3' (transform). Compile-time only."""
+    """Teammate closest to your player 3. Game label: 'Teammate Nearest Team Player 3'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def teammate_nearest_team_player_4() -> object:
-    """Sensor 'Teammate Nearest Team Player 4' (transform). Compile-time only."""
+    """Teammate closest to your player 4. Game label: 'Teammate Nearest Team Player 4'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def upper_corner_away_side() -> object:
-    """Sensor 'Upper Corner Away Side' (vector3). Compile-time only."""
+    """Corner position, away side upper. Game label: 'Upper Corner Away Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def upper_corner_home_side() -> object:
-    """Sensor 'Upper Corner Home Side' (vector3). Compile-time only."""
+    """Corner position, home side upper. Game label: 'Upper Corner Home Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def upper_corner_opposing_side() -> object:
-    """Sensor 'Upper Corner Opposing Side' (vector3). Compile-time only."""
+    """Opposing corner, upper. Game label: 'Upper Corner Opposing Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def upper_corner_team_side() -> object:
-    """Sensor 'Upper Corner Team Side' (vector3). Compile-time only."""
+    """Team corner, upper. Game label: 'Upper Corner Team Side'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def upper_midfield() -> object:
-    """Sensor 'Upper Midfield' (vector3). Compile-time only."""
+    """Midfield position, upper. Game label: 'Upper Midfield'."""
     raise RuntimeError('author stub: compile with graphc')
 
 def move(x: float, z: float) -> None:
-    """Soccer controller. Compile-time only."""
+    """Drive to field position (x, z). Exactly one controller call per tick."""
     raise RuntimeError('author stub: compile with graphc')
 

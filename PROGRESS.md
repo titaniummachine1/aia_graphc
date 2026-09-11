@@ -206,6 +206,23 @@ serve-latch parity bot 27.
    All 3 import forms compile (`import ... as t`, `from ...v014 import x`,
    `from ...tennis import v014`); version mismatch fails loudly. Rival
    example ported; same 17 nodes / 36 transitions, replay identical.
+9. ✅ Latest-by-default + v15f (user directive 2026-09-11): `("tennis",
+   "v15f")` accepted everywhere (Python + Rust gates), nodes assumed
+   v0.14-identical; unversioned `AIA_Comp_Libry.tennis` (= latest v15f)
+   in all import forms; mixing latest with a v0.14 target (or v014 with
+   v15f) fails loudly. Stubs regenerated with per-sensor docstrings.
+10. ✅ Idiot-proof audit (user directive: misbehaving AI is provably the
+    author's fault): single controller per tick, single set_var/array per
+    name per tick, no `api` rebinding anywhere (assign/augassign/param/
+    const/function), conflicting cross-file constants loud, tailored
+    errors for and/or/ternary/subscript/walrus, project-import whitelist
+    in single scripts too. 30-case battery: 30/30 loud, legit patterns
+    green, graph-equivalence intact.
+11. ✅ Docs for humans + LLMs + IDEs: 391/391 sensors carry hand-written
+    descriptions (tennis from parity forensics, soccer from game
+    semantics) into stub docstrings; `py.typed` markers; README rewritten
+    simplest-first (10-line bot -> 3 commands -> guarantee -> API ->
+    projects -> internals).
 6. ⏳ Sim side (aia_comp-sim, same session): measured serve-area box wired
    (`court.rs` SERVE_AREA_BACK=2.25, 163 tests green); setup-server table
    (`reset_sweep.jsonl`) wired into `run_sim_tournament_pairs.py`
