@@ -1,5 +1,39 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 9 (2026-09-11, compiler track: plain-variable state + QOL)
+
+User directive: "replace api.set_var with just regular python variables —
+we have a python parser." Done, with the one simple rule ("written =>
+dynamic, never written => constant"):
+
+1. ✅ Auto cross-tick state (`graphc/ast_fe.py`): a module-level numeric
+   variable the bot ASSIGNS becomes a latch — first read pulls
+   GetVariable, the single end-of-tick value emits SetVariable, branch
+   writes merge to select. A module variable the bot only reads stays an
+   inlined constant. No `api.var`/`api.set_var`, no annotation. State must
+   init to 0 (game vars start at 0) — loud otherwise. State assigned from a
+   loop/recursion/helper is loud (ambiguous write order). `global x` is
+   accepted (declarative no-op).
+2. ✅ Cross-tick DCE (`graphc/desc.py` optimize_ops): a latch written but
+   never read is dead storage — demote the var_set and let liveness drop
+   its whole value chain (transitions are the cost metric). Verified:
+   write-only state compiles to ZERO var nodes; read+write stays.
+3. ✅ Frontend QOL fixes (found writing 4 test bots): pure `api.*` reads
+   (sensors, split_vector, position_of, var, array reads, auto_swing) are
+   now allowed inside `if` branches (only sinks stay loud); a variable
+   first assigned inside one arm is no longer mis-typed as float (treated
+   as path-local; a later read fails as path-dependent). 4 example bots
+   (`examples/bots/`: pusher, open_court, alternator, cross_court project)
+   compile and play; alternator rewritten to plain variables and matches
+   the api.var build bit-for-bit (same 7185/8483-tick outcomes).
+4. ⏳ Parity methodology (user directive): exact 1:1 parity is SHELVED
+   (matched first-server table was 8/78, ~3 min/seed to measure, plus RNG
+   — an endgame task). Target is now STATISTICAL equivalence: same
+   starting-condition distribution => same outcome distribution over many
+   games. Note for later: the sim ignores `t.aim()`/AutoAim unless
+   `AIA_AIM_MODEL=separate` (measured 18/78 separate vs 24/78 legacy on the
+   mismatched-start set — both invalid pending matched starts).
+
 ## Session 7 (2026-09-11, compiler track: assist chain + underdog + battery)
 
 User stress-testing the API: the first underdog held swing forever (charges,

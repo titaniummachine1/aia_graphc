@@ -56,9 +56,21 @@ graphc-rs mybot.desc.json mybot.txt                     # graph IR -> game save
   exact version with `import AIA_Comp_Libry.tennis.v014 as t` instead.
   Wrong version for your target fails at compile time, loudly.
 - Plain Python otherwise: helpers in any file (`import aim` just works),
-  arithmetic, `if/else`, named memory (`api.var` / `api.set_var`),
-  arrays (`api.array` + `set_array_cell` / `get_array_cell`). One controller call
-  (`t.move`) per tick.
+  arithmetic, `if/else`, and cross-tick memory as a **plain module
+  variable** — if the bot writes it, it persists; if it only reads it, it
+  is inlined as a constant. `api.array` + `set_array_cell` /
+  `get_array_cell` for indexed RAM. One controller call (`t.move`) per tick.
+- Memory, the Python way:
+  ```python
+  shots_seen = 0.0            # module variable the bot writes -> latch
+  def tick(api):
+      if t.ball_incoming():
+          shots_seen = shots_seen + 1.0
+      ...
+  ```
+  No `api.var`/`api.set_var`, no annotation. State must start at 0 (game
+  variables start at 0). A variable written but never read is optimized
+  away.
 - Anything the compiler cannot turn into nodes fails HERE with a pointing
   error — never a silently different bot. If your AI misbehaves in game,
   it is doing exactly what you coded.

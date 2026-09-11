@@ -183,6 +183,71 @@ def test_stale_sensor_warns_not_fails() -> None:
         assert "predicted_bounce" in buf.getvalue(), f"no stale warning for {src[:40]!r}"
 
 
+def test_auto_state() -> None:
+    # One rule: a module variable the bot WRITES is a cross-tick latch; one
+    # it only reads stays an inlined constant. No api.var/set_var.
+    src = (
+        "import AIA_Comp_Libry.tennis.v014 as tennis\n"
+        "DEEP = 11.0\n"          # never written -> constant
+        "seen = 0.0\n"           # written -> persistent latch
+        "def tick(api):\n"
+        "    if tennis.ball_incoming():\n"
+        "        seen = seen + 1.0\n"
+        "    tennis.aim(DEEP, seen % 2.0)\n"
+        "    tennis.move(0.0, 0.0, tennis.auto_swing(2.0), 2.0)\n"
+    )
+    desc = compile_source(src, ("tennis", "v0.14"))
+    ops = [o["op"] for o in desc["ops"]]
+    assert "var_get" in ops and "var_set" in ops, f"state latch missing: {ops}"
+    # Written state emits exactly one SetVariable (end of tick).
+    assert ops.count("var_set") == 1, ops
+    # Read-only constant inlines (const 11.0 present, no var for it).
+    assert any(o["op"] == "const" and o.get("value") == 11.0
+               for o in desc["ops"]), desc["ops"]
+    # Non-zero state init is loud (game variables start at 0).
+    bad = (
+        "import AIA_Comp_Libry.tennis.v014 as tennis\n"
+        "seen = 5.0\n"
+        "def tick(api):\n"
+        "    seen = seen + 1.0\n"
+        "    tennis.move(0.0, 0.0, tennis.auto_swing(2.0), 2.0)\n"
+    )
+    try:
+        compile_source(bad, ("tennis", "v0.14"))
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("non-zero state init must fail loudly")
+    # State written from a helper is ambiguous -> loud.
+    bad2 = (
+        "import AIA_Comp_Libry.tennis.v014 as tennis\n"
+        "seen = 0.0\n"
+        "def bump(api):\n"
+        "    seen = seen + 1.0\n"
+        "def tick(api):\n"
+        "    bump(api)\n"
+        "    tennis.move(0.0, 0.0, tennis.auto_swing(2.0), 2.0)\n"
+    )
+    try:
+        compile_source(bad2, ("tennis", "v0.14"))
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("helper state write must fail loudly")
+    # Write-only state is dead storage -> optimized away (no var nodes).
+    wonly = (
+        "import AIA_Comp_Libry.tennis.v014 as tennis\n"
+        "ghost = 0.0\n"
+        "def tick(api):\n"
+        "    ghost = 5.0\n"
+        "    tennis.move(0.0, 0.0, tennis.auto_swing(2.0), 2.0)\n"
+    )
+    d3 = compile_source(wonly, ("tennis", "v0.14"))
+    ops3 = [o["op"] for o in d3["ops"]]
+    assert "var_set" not in ops3 and "var_get" not in ops3, \
+        f"write-only latch must be optimized away: {ops3}"
+
+
 def test_split_drive_compiles() -> None:    # Walk/aim/swing split across the native assist nodes (the basic-bot
     # shape): aim request + AutoSwing + one controller, all wired.
     desc = compile_source(
@@ -213,6 +278,8 @@ if __name__ == "__main__":
     test_project_rules()
     test_full_names_match_shorts()
     test_stale_sensor_warns_not_fails()
+    test_auto_state()
     test_split_drive_compiles()
     test_legit_patterns_stay_green()
-    print(f"misuse battery ok ({len(CASES)} cases + project rules + full names + split drive + legit patterns)")
+    print(f"misuse battery ok ({len(CASES)} cases + project rules + full names "
+          "+ split drive + auto state + legit patterns)")

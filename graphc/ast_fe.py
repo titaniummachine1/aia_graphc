@@ -10,10 +10,11 @@ Supported (v1):
     if <cond>: ... else: ...      REAL if: cond evaluated first, both
                                   branches compiled, assigned names merged
                                   with select (SSA phi)
-    api.move(x, z)                soccer controller (target soccer)
-    api.var("name")               cross-tick read (latch)
-    api.set_var("name", expr)     cross-tick write
-    buf = api.array("name", n)    packed array handle
+    NAME = <num> (module level)   a module variable the bot WRITES becomes
+                                  cross-tick state automatically (writes =>
+                                  dynamic latch, never written => inlined
+                                  constant); no annotation, no api.var
+    api.array("name", n)          packed array handle (RAM)
     api.set_array_cell(buf, i, v) static cell write
     api.get_array_cell(buf, i)    static cell read
     api.get_array_cell_dynamic(buf, idx)  dynamic cell read (select-chain)
@@ -21,7 +22,7 @@ Supported (v1):
                                   observable in game, sim, pure VM)
     api.move(x, z)                soccer controller (target soccer)
     api.soccer_get_bool/float/vector3/transform(label)   sensors (soccer)
-    api.position_of(t)          transform -> position vector (soccer)
+    api.position_of(t)            transform -> position vector
     api.tennis_get_bool/float/vector3/transform(label)   sensors (tennis)
     api.tennis_move(x, z, swing=None, shot=None, sprint=None)  (tennis)
     api.tennis_move_vec(v, swing=None, shot=None, sprint=None) (tennis)
@@ -30,13 +31,9 @@ Supported (v1):
                                   per tick, paired with a controller)
     api.tennis_auto_swing(shot, mode='Prefer Charge')  game swing node
                                   -> bool (wire into move's swing)
-    api.tennis_aim(x, z)          strike-aim request for the next move
-                                  (autoswitch — walk wire untouched; one
-                                  per tick, paired with a controller)
-    api.tennis_auto_swing(shot, mode='Prefer Charge')  game swing node
-                                  -> bool (wire into move's swing)
-    api.split_vector(v, i)      vector component -> float (i: 0=x,1=y,2=z)
+    api.split_vector(v, i)        vector component -> float (i: 0=x,1=y,2=z)
     api.make_vector(x, y, z)      3 floats -> vector (feeds tennis_move_vec)
+    api.var("name") / set_var     explicit latch (legacy; prefer module vars)
 
 Bounded control flow (unrolled/inlined at compile time — the game runs
 the flat graph, so per-tick cost stays static and reported):
@@ -106,6 +103,15 @@ _FULL_NAMES = {
     "vec_split": "split_vector",
     "vec_make": "make_vector",
     "pos_of": "position_of",
+}
+
+#: api.* calls whose effect is a side effect (controller / latch / sink):
+#: ambiguous inside an if branch, always loud. Everything else (sensors,
+#: split_vector, position_of, var, array reads, make_vector, auto_swing)
+#: is a pure value and is allowed in branches.
+_BRANCH_SINK_FNS = {
+    "set_var", "set_array_cell", "move", "tennis_move", "tennis_move_vec",
+    "tennis_aim", "plot",
 }
 _CMP = {ast.Lt: "<", ast.Gt: ">", ast.LtE: "<=", ast.GtE: ">=",
         ast.Eq: "==", ast.NotEq: "!="}
@@ -192,6 +198,11 @@ class _Ctx:
         self._set_cells: set[tuple[int, int]] = set()
         self._arrays: set[str] = set()
         self._controller: str | None = None
+        # Auto cross-tick state: module-level names the bot reassigns.
+        # Reads emit GetVariable, the single end-of-tick value emits
+        # SetVariable — plain Python variables, no api.var/set_var.
+        self._state_names: set[str] = set()
+        self._state_dirty: set[str] = set()
         # Split drive (tennis): tennis_aim records the strike-aim request
         # for the next tennis_move (autoswitch — walk wire untouched);
         # one aim per tick, and never without its controller.
@@ -289,6 +300,13 @@ def _expr(ctx: _Ctx, node: ast.expr) -> int:
         return op_id
     if isinstance(node, ast.Name):
         if node.id not in ctx._env:
+            # Module-level variable the bot mutates: first read pulls the
+            # persisted latch (GetVariable). Plain Python state, no api.var.
+            if node.id in ctx._state_names:
+                op = ctx._set_type(ctx._emit(
+                    {"op": "var_get", "name": node.id}), "float")
+                ctx._env[node.id] = op
+                return op
             raise SyntaxError(f"name {node.id!r} used before assignment")
         v = ctx._env[node.id]
         if v == _API_MARKER:
@@ -670,10 +688,19 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
     # Self-documenting full spellings are canonical; terse aliases still
     # work (normalized here, so errors and docs always name the full form).
     fn = _FULL_NAMES.get(fn, fn)
-    if ctx._in_branch:
+    # Pure reads (sensors, split_vector, position_of, var, array reads,
+    # make_vector, auto_swing) are safe inside if branches: both arms
+    # evaluate every tick anyway, so emitting the op unconditionally is
+    # exactly what the graph does. Only SIDE-EFFECT sinks are ambiguous in
+    # a branch (double writes / double controllers), and those stay loud.
+    if ctx._in_branch and fn in _BRANCH_SINK_FNS:
         raise SyntaxError(
-            "api.* calls inside if branches not supported yet — only "
-            "assignments merge; hoist the call")
+            f"api.{fn} inside an if branch is ambiguous in-game (it would "
+            "run on the branch's arm only) — hoist it out of the branch")
+    if ctx._in_branch and fn == "array":
+        raise SyntaxError(
+            "api.array declaration inside an if branch — declare memory at "
+            "the top of the tick")
     args = node.args
     if fn == "var":
         (name,) = args
@@ -1237,13 +1264,30 @@ def _range_trips(node: ast.Call) -> list:
     return list(range(start, stop, step))
 
 
+def _mark_state(ctx: _Ctx, name: str) -> None:
+    """A module-level (persistent) variable was assigned this tick."""
+    if name not in ctx._state_names:
+        return
+    if ctx._loop_stack or ctx._rec_depth or ctx._helper_depth:
+        raise SyntaxError(
+            f"{name!r} is persistent state (a module variable) — assign it "
+            "at the top level of tick, not inside a loop, recursion, or a "
+            "helper (in-game write order would be ambiguous)")
+    ctx._state_dirty.add(name)
+
+
 def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
+    if isinstance(s, ast.Global):
+        # `global x` is declarative in Python; module variables here are
+        # already persistent, so it is accepted and ignored.
+        return
     if isinstance(s, ast.Assign):
         if len(s.targets) != 1 or not isinstance(s.targets[0], ast.Name):
             raise SyntaxError("only single-name assignments")
         if s.targets[0].id == "api":
             raise SyntaxError(
                 "cannot assign to 'api' — it is the game-API namespace")
+        _mark_state(ctx, s.targets[0].id)
         ctx._env[s.targets[0].id] = _gate_assign(
             ctx, s.targets[0].id, _expr(ctx, s.value))
     elif isinstance(s, ast.AugAssign):
@@ -1253,6 +1297,7 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
         if name == "api":
             raise SyntaxError(
                 "cannot assign to 'api' — it is the game-API namespace")
+        _mark_state(ctx, name)
         if name not in ctx._env:
             raise SyntaxError(f"name {name!r} used before assignment")
         fn = _BIN.get(type(s.op))
@@ -1321,6 +1366,11 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
         for name in set(env_true) | set(env_false):
             t = env_true.get(name, env_saved.get(name))
             f = env_false.get(name, env_saved.get(name))
+            # Branch-local name (assigned on one path only, no prior
+            # value): not a phi — leave it unbound so a later read fails
+            # loudly as path-dependent, instead of mis-typing it as float.
+            if t is None or f is None:
+                continue
             if t != f:
                 tt, ff = ctx._typeof(t), ctx._typeof(f)
                 if tt != ff:
@@ -1669,17 +1719,49 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
         raise SyntaxError("multiple tick functions across project files")
     (bmod, bname) = bots[0]
     ctx._active.add((bmod, bname))
+    fdef = ctx._functions[(bmod, bname)]
+    bargs = fdef.args.args
+    if len(bargs) != 1 or bargs[0].arg != "api" or fdef.args.vararg \
+            or fdef.args.kwarg:
+        raise SyntaxError("bot function tick takes exactly (api)")
+    # Auto cross-tick state, the one simple rule: a module-level numeric
+    # name the bot WRITES becomes a latch; one it only reads stays an
+    # inlined constant. No annotation, no api.var/set_var, no static
+    # analysis — "written => dynamic, never written => constant".
+    assigned_in_bot = {
+        n.id for n in ast.walk(fdef)
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+    }
+    for name in sorted(assigned_in_bot & set(seen_consts)):
+        if seen_consts[name] != 0:
+            raise SyntaxError(
+                f"persistent state {name!r} must start at 0 (game variables "
+                f"start at 0) — set {name} in tick instead of initializing "
+                f"it to {seen_consts[name]}")
+        ctx._env.pop(name, None)
+        ctx._state_names.add(name)
     saved = dict(ctx._env)
+    state_writes: dict[str, int] = {}
     try:
-        fdef = ctx._functions[(bmod, bname)]
-        bargs = fdef.args.args
-        if len(bargs) != 1 or bargs[0].arg != "api" or fdef.args.vararg \
-                or fdef.args.kwarg:
-            raise SyntaxError("bot function tick takes exactly (api)")
+        # Materialize every state name up front (GetVariable). This gives
+        # each one a previous-tick base so a branch-local write merges into
+        # `select(cond, new, previous)` instead of being dropped; unused
+        # reads are dead code and DCE removes them.
+        for name in sorted(ctx._state_names):
+            ctx._env[name] = ctx._set_type(
+                ctx._emit({"op": "var_get", "name": name}), "float")
         _block(ctx, fdef.body)
+        for name in ctx._state_dirty:
+            if name in ctx._env:
+                state_writes[name] = ctx._env[name]
     finally:
         ctx._active.remove((bmod, bname))
         ctx._env = saved
+    # One SetVariable per written state name, with the value the tick
+    # finished on (branch merges already became selects).
+    for name in sorted(state_writes):
+        ctx.ops.append({"op": "var_set", "name": name,
+                        "v": state_writes[name]})
     if ctx._aim_pending and ctx._controller is None:
         raise SyntaxError(
             "api.tennis_aim without a controller — the aim only steers a "

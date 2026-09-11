@@ -1,4 +1,4 @@
-"""Underdog v4: walk to the incoming bounce, aim the far half, AutoSwing.
+"""Underdog v5: walk to the incoming bounce, aim the far half, AutoSwing.
 
 Autoswitch split (TennisAutoSwitch reference: raw controller Vector31 is
 *either* move *or* aim, never both):
@@ -8,6 +8,7 @@ Autoswitch split (TennisAutoSwitch reference: raw controller Vector31 is
 - aim wire: legal T-target on serve, mirrored deep-middle otherwise
   (sensors read OWN half — negate x onto the opponent half).
 - swing: the game's TennisAutoSwing node (Prefer Charge).
+U.* TimePlots mirror every wire for game-vs-sim channel parity.
 One file, one tick, one controller call.
 """
 import AIA_Comp_Libry.tennis.v014 as tennis
@@ -48,5 +49,28 @@ def tick(api):
         aim_x = rally_aim_x
         aim_z = rally_aim_z
     swing = tennis.auto_swing(2.0)
+    if serving:
+        serving_flag = 1.0
+    else:
+        serving_flag = 0.0
+    if swing:
+        swing_flag = 1.0
+    else:
+        swing_flag = 0.0
+    ball = tennis.ball_position()
+    ball_x = api.split_vector(ball, 0)
+    ball_y = api.split_vector(ball, 1)
+    ball_z = api.split_vector(ball, 2)
+    charge = tennis.self_swing_charge_pct()
+    api.plot("U.serving", serving_flag)
+    api.plot("U.swing", swing_flag)
+    api.plot("U.charge", charge)
+    api.plot("U.aim_x", aim_x)
+    api.plot("U.aim_z", aim_z)
+    api.plot("U.walk_x", walk_x)
+    api.plot("U.walk_z", walk_z)
+    api.plot("U.ball_x", ball_x)
+    api.plot("U.ball_y", ball_y)
+    api.plot("U.ball_z", ball_z)
     tennis.aim(aim_x, aim_z)
     tennis.move(walk_x, walk_z, swing, 2.0)

@@ -425,6 +425,9 @@ def optimize_ops(ops: list[dict], level: int = 1) -> list[dict]:
       same-value select is pure waste).
     - DCE: drop ops unreachable from side-effect sinks (dead sensors,
       orphaned consts, folded selects).
+    - cross-tick DCE: a latch written but never read is dead storage
+      (same code runs every tick, so "never read" is "never read ever") —
+      demote the var_set and let liveness drop its value chain.
     """
     if level < 1:
         return ops
@@ -446,16 +449,23 @@ def optimize_ops(ops: list[dict], level: int = 1) -> list[dict]:
             for o in ops:
                 for k, v in _refs(o):
                     o[k] = resolve(v)
-    live: set[int] = set()
-    stack = [i for i, o in enumerate(ops) if o["op"] in _SINKS]
-    while stack:
-        i = stack.pop()
-        if i in live:
-            continue
-        live.add(i)
-        for _, v in _refs(ops[i]):
-            if v not in live:
-                stack.append(v)
+        live: set[int] = set()
+        stack = [i for i, o in enumerate(ops) if o["op"] in _SINKS]
+        while stack:
+            i = stack.pop()
+            if i in live:
+                continue
+            live.add(i)
+            for _, v in _refs(ops[i]):
+                if v not in live:
+                    stack.append(v)
+        # Latch names actually read this tick (live var_gets).
+        read_names = {ops[i]["name"] for i in live if ops[i]["op"] == "var_get"}
+        for i in sorted(live):
+            o = ops[i]
+            if o["op"] == "var_set" and o["name"] not in read_names:
+                o["op"] = "dead_write"  # demote: no longer a sink
+                changed = True
     keep = sorted(live)
     remap = {old: new for new, old in enumerate(keep)}
     out = []
