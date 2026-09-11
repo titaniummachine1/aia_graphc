@@ -109,7 +109,9 @@ TENNIS_VECTOR3 = {
     "Random Aim Target": "A game-picked aim point.",
     "Self Average Scoring Location": "Where your winners usually land.",
     "Opponent Average Scoring Location": "Where their winners usually land.",
-    "Estimated Opponent Shot Location": "Game's guess at their landing spot.",
+    "Estimated Opponent Shot Location": "Game's guess at their landing spot. "
+    "STALE outside the post-own-hit receive window (compiler warns) — prefer "
+    "predicted_bounce for walking.",
     "Trick Drop Modifier": "Aim offset making a trick shot drop.",
     "Trick Lob Modifier": "Aim offset making a trick shot lob.",
     "Trick Curve Left Modifier": "Aim offset curving a trick shot left.",
@@ -314,12 +316,27 @@ SOCCER_TRANSFORM = {
 }
 
 TENNIS_MOVE_DOC = (
-    "Drive to court position (x, z) and strike: swing truthy charges/hits, "
-    "shot is a Shot:* id, sprint truthy sprints. Exactly one controller "
+    "Drive to court position (x, z) and strike: the request runs through "
+    "the game's TennisAutoAim + TennisAutoMove assist before the "
+    "controller. Swing: hold (truthy) builds charge, RELEASE strikes — "
+    "holding forever never hits, gate it on charge "
+    "(if chg >= 0.7: swing = False else: swing = in_range). "
+    "Shot is a Shot:* id, sprint truthy sprints. Exactly one controller "
     "call per tick."
 )
 TENNIS_MOVE_VEC_DOC = (
     "Same as move but driven by a vector (vec_make or a vector sensor)."
+)
+TENNIS_AIM_DOC = (
+    "Strike-aim request for the next move call (autoswitch): the walk "
+    "destination stays on the move wire — the game switches strike aim "
+    "without touching how you walk. Pair with exactly one move per tick; "
+    "aim without move fails loudly."
+)
+TENNIS_AUTO_SWING_DOC = (
+    "Game swing node: hold builds charge, release strikes (mode: "
+    "Normal Only | Prefer Charge | Random, default Prefer Charge). "
+    "Returns the swing bool — wire it into move's swing."
 )
 SOCCER_MOVE_DOC = (
     "Drive to field position (x, z). Exactly one controller call per tick."

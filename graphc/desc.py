@@ -21,14 +21,23 @@ Op set (SSA-ish; ids are line numbers):
     "index":n,"label":str}                        (target tennis)
    {"op":"tennis_move","x":id,"z":id,"swing":id|null,
     "shot":id|null,"sprint":id|null}              (target tennis)
+   {"op":"tennis_aim","x":id,"z":id}              aim request: AutoAim ->
+    AutoMove(V32) for the NEXT tennis_move in the same tick (walk target
+    stays on the move wire — the game switches strike aim without
+    touching how you walk).                       (target tennis)
+   {"op":"tennis_auto_swing","shot":id} -> bool   game swing node
+    (Prefer Charge): hold builds charge, release strikes. (target tennis)
    {"op":"vec_split","v":id,"i":0|1|2}            vector component -> float
     (x=0, y=1, z=2; e.g. latch "Legal Serve Target" components in vars)
    {"op":"vec_make","x":id,"y":id,"z":id}         3 floats -> vector handle
    {"op":"tennis_move_vec","v":id,"swing":id|null,
     "shot":id|null,"sprint":id|null}              (target tennis)
    {"op":"soccer_get","kind":bool|float|vector3|transform,
-    "index":n,"label":str}                         (target soccer; backend
-    lowering pending — backend fails loudly on it today)
+    "index":n,"label":str}                         (target soccer)
+   {"op":"transform_pos","v":id}                 RelativePosition(World):
+    transform -> world position vector (api.pos_of)
+   {"op":"plot","name":str,"v":id}               TimePlot debug sink
+    (all targets incl. universal — observable in game, sim, pure VM)
 Output description:
   {"schema":"graphc-desc-v1","target":{"game":..,"version":..},
    "bot_name":str,"ops":[...]}
@@ -108,9 +117,9 @@ _SOCCER_GET_NODES = {
 def soccer_sensor_index(kind: str, label: str) -> tuple[int, str]:
     """Soccer dropdown label -> builder-order index.
 
-    NOTE: the Rust backend does not lower soccer_get yet (loud error there);
-    tennis is the verified path. This resolver pins the ABI now so bots can
-    author against it.
+    The Rust backend lowers soccer_get like tennis_get; the sim resolves
+    the numeric modifier through its own tables (same order — Team
+    Player 1 == 1 on both sides), and rejects unknown labels loudly.
     """
     from AIGamePyLibrary.data import DROPDOWN_OPTIONS
 
@@ -272,6 +281,43 @@ class GraphCtx:
             "sprint": None if sprint is None else self._desc(sprint),
         })
 
+    def tennis_aim(self, x, z) -> None:
+        """Aim request for the NEXT tennis_move in the same tick: the
+        backend routes it through TennisAutoAim into TennisAutoMove(V32)
+        while the move wire keeps the walk target (autoswitch — walk
+        destination unaffected, strikes land on the aim)."""
+        self._require_tennis()
+        self.ops.append({
+            "op": "tennis_aim",
+            "x": self._desc(x), "z": self._desc(z),
+        })
+
+    def tennis_auto_swing(self, shot, mode: str = "Prefer Charge") -> Sym:
+        """Game swing node: returns the swing bool — hold builds charge,
+        release strikes (mode: Normal Only | Prefer Charge | Random).
+        Wire it into the move's swing."""
+        self._require_tennis()
+        return self._emit({"op": "tennis_auto_swing",
+                           "shot": self._desc(shot), "mode": mode})
+
+    # --- soccer surface -----------------------------------------------------
+    def _require_soccer(self) -> None:
+        if self.target[0] != "soccer":
+            raise TypeError(f"soccer API is not valid for target {self.target}")
+
+    def soccer_get(self, kind: str, label: str) -> Sym:
+        """Sensor read by dropdown label (bool/float/vector3/transform);
+        index resolved against the game tables, recorded alongside."""
+        self._require_soccer()
+        idx, label = soccer_sensor_index(kind, label)
+        typ = {"vector3": "vector", "transform": "transform"}.get(kind, kind)
+        return self._emit({"op": "soccer_get", "kind": kind,
+                           "index": idx, "label": label})
+
+    def transform_pos(self, v) -> Sym:
+        """World position vector out of a transform (RelativePosition)."""
+        return self._emit({"op": "transform_pos", "v": self._desc(v)})
+
     # --- vectors ------------------------------------------------------------
     def vec_split(self, v, i: int) -> Sym:
         """Vector component -> float (i: 0=x, 1=y, 2=z). The backend shares
@@ -285,6 +331,19 @@ class GraphCtx:
         """3 floats -> opaque vector handle (backend: ConstructVector3)."""
         return self._emit({"op": "vec_make", "x": self._desc(x),
                            "y": self._desc(y), "z": self._desc(z)})
+
+    # --- debug sinks --------------------------------------------------------
+    def plot(self, name: str, value) -> None:
+        """TimePlot debug sink: {"op":"plot","name":str,"v":id}.
+
+        Channel name is a static string (part of the save, not a value);
+        the plotted value is any float. Repeatable, all targets including
+        universal — the channel is observable in game (TimePlot export),
+        sim, and pure VM, which makes it the compiler-verification surface.
+        """
+        if not isinstance(name, str) or not name:
+            raise TypeError(f"plot channel must be a non-empty str, got {name!r}")
+        self.ops.append({"op": "plot", "name": name, "v": self._desc(value)})
 
     # --- arrays -------------------------------------------------------------
     def array(self, name: str, cells: int) -> "PackedArray":
@@ -347,7 +406,7 @@ _LITERAL_KEYS = {
 }
 # Side-effect sinks: DCE roots. Everything else must feed a sink.
 _SINKS = {"var_set", "array_set_static", "soccer_move", "tennis_move",
-          "tennis_move_vec"}
+          "tennis_move_vec", "tennis_aim", "plot"}
 
 
 def _refs(op: dict):

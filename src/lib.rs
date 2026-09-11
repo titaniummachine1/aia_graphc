@@ -52,6 +52,14 @@ pub enum Op {
         index: usize,
         label: String,
     },
+    #[serde(rename = "soccer_get")]
+    SoccerGet {
+        kind: String,
+        index: usize,
+        label: String,
+    },
+    #[serde(rename = "transform_pos")]
+    TransformPos { v: usize },
     #[serde(rename = "tennis_move")]
     TennisMove {
         x: usize,
@@ -71,6 +79,12 @@ pub enum Op {
         shot: Option<usize>,
         sprint: Option<usize>,
     },
+    #[serde(rename = "tennis_aim")]
+    TennisAim { x: usize, z: usize },
+    #[serde(rename = "tennis_auto_swing")]
+    TennisAutoSwing { shot: usize, mode: String },
+    #[serde(rename = "plot")]
+    Plot { name: String, v: usize },
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -111,6 +125,23 @@ const PORTS: &[(&str, &[(&str, i32)])] = &[
     ),
     ("GetVariable", &[("Any1", 1)]),
     ("SetVariable", &[("Any1", 0)]),
+    ("SoccerGetBool", &[("Bool1", 1)]),
+    ("SoccerGetFloat", &[("Float1", 1)]),
+    ("SoccerGetVector3", &[("Vector31", 1)]),
+    ("SoccerGetTransform", &[("Transform1", 1)]),
+    ("RelativePosition", &[("Transform1", 0), ("Vector31", 1)]),
+    ("String", &[("String1", 1)]),
+    (
+        "TimePlot",
+        &[
+            ("String1", 0),
+            ("Color1", 0),
+            ("String2", 0),
+            ("Float1", 0),
+            ("Float2", 0),
+            ("Float3", 0),
+        ],
+    ),
     (
         "ConstructVector3",
         &[("Vector31", 1), ("Float3", 0), ("Float1", 0), ("Float2", 0)],
@@ -128,6 +159,19 @@ const PORTS: &[(&str, &[(&str, i32)])] = &[
         "TennisController",
         &[("Vector31", 0), ("Bool1", 0), ("Float1", 0), ("Bool2", 0)],
     ),
+    // Game assist stack (AIGamePyLibrary data.ports, order + polarity
+    // exact): compiled bots drive serves/rallies through the same
+    // AutoAim -> AutoMove chain the native bots use, so the game applies
+    // its aim assist and the sim resolves the aim path (cmd.aim).
+    ("TennisAutoAim", &[("Vector31", 0), ("Vector31", 1)]),
+    (
+        "TennisAutoMove",
+        &[("Vector31", 0), ("Vector32", 0), ("Vector31", 1)],
+    ),
+    (
+        "TennisAutoSwing",
+        &[("Float1", 0), ("Bool1", 1), ("Float1", 1)],
+    ),
 ];
 
 fn ports_table(kind: &str) -> Vec<(&'static str, i32)> {
@@ -140,10 +184,10 @@ fn ports_table(kind: &str) -> Vec<(&'static str, i32)> {
 
 fn out_port(kind: &str) -> &'static str {
     match kind {
-        "CompareFloats" | "Not" | "TennisGetBool" => "Bool1",
+        "CompareFloats" | "Not" | "TennisGetBool" | "SoccerGetBool" => "Bool1",
         "GetVariable" => "Any1",
-        "ConstructVector3" | "TennisGetVector3" => "Vector31",
-        "TennisGetTransform" => "Transform1",
+        "ConstructVector3" | "TennisGetVector3" | "SoccerGetVector3" | "RelativePosition" => "Vector31",
+        "TennisGetTransform" | "SoccerGetTransform" => "Transform1",
         _ => "Float1",
     }
 }
@@ -295,6 +339,9 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
     let mut pending: HashMap<usize, HashMap<usize, HashMap<usize, usize>>> = HashMap::new();
     // vec_split source ssa id -> shared Vector3Split node
     let mut vec_splits: HashMap<usize, usize> = HashMap::new();
+    // tennis_aim request (node, port), consumed by the next tennis_move;
+    // None = legacy: the move vector feeds both walk and aim.
+    let mut pending_aim: Option<(usize, &'static str)> = None;
 
     for (op_id, op) in desc.ops.iter().enumerate() {
         match op {
@@ -398,6 +445,15 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 em.edge(vec, "Vector31", n, "Vector31");
                 vals.push(Val::Const(0.0)); // placeholder: op id alignment
             }
+            Op::Plot { name, v } => {
+                // Debug sink: valid on every target including universal
+                // (no game API involved — String + TimePlot are common).
+                let s = em.node("String", name.clone());
+                let t = em.node("TimePlot", String::new());
+                em.edge(s, "String1", t, "String1");
+                wire_val(&mut em, &vals, *v, t, "Float1");
+                vals.push(Val::Const(0.0)); // placeholder: op id alignment
+            }
             Op::TennisGet { kind, index, .. } => {
                 require_game(game, "tennis", "tennis_get")?;
                 let node_kind = match kind.as_str() {
@@ -410,13 +466,52 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 let n = em.node(node_kind, index.to_string());
                 vals.push(Val::Node(n, out_port(node_kind)));
             }
+            Op::SoccerGet { kind, index, .. } => {
+                require_game(game, "soccer", "soccer_get")?;
+                let node_kind = match kind.as_str() {
+                    "bool" => "SoccerGetBool",
+                    "float" => "SoccerGetFloat",
+                    "vector3" => "SoccerGetVector3",
+                    "transform" => "SoccerGetTransform",
+                    other => return Err(format!("unknown soccer sensor kind {other:?}")),
+                };
+                let n = em.node(node_kind, index.to_string());
+                vals.push(Val::Node(n, out_port(node_kind)));
+            }
+            Op::TransformPos { v } => {
+                // RelativePosition in World mode (dropdown index 13):
+                // transform -> world position vector. Game-agnostic node
+                // (no game gate — validity comes from the transform source).
+                let n = em.node("RelativePosition", "13".into());
+                match vals.get(*v) {
+                    Some(Val::Node(src, sport)) => em.edge(*src, sport, n, "Transform1"),
+                    Some(Val::Const(_)) => {
+                        return Err("transform_pos of a constant float — source must be a transform".into());
+                    }
+                    None => return Err(format!("transform_pos of unknown op id {v}")),
+                }
+                vals.push(Val::Node(n, "Vector31"));
+            }
             Op::TennisMove { x, z, swing, shot, sprint } => {
                 require_game(game, "tennis", "tennis_move")?;
-                let vec = em.node("ConstructVector3", String::new());
-                wire_val(&mut em, &vals, *x, vec, "Float1");
-                wire_val(&mut em, &vals, *z, vec, "Float3");
+                let move_vec = em.node("ConstructVector3", String::new());
+                wire_val(&mut em, &vals, *x, move_vec, "Float1");
+                wire_val(&mut em, &vals, *z, move_vec, "Float3");
+                // Aim source: explicit tennis_aim wins (autoswitch — the
+                // walk destination stays on the move wire); else the move
+                // vector feeds both (legacy single-wire bots).
+                let (aim_src, aim_port) = pending_aim
+                    .take()
+                    .unwrap_or((move_vec, "Vector31"));
+                // Native drive chain (titanium pattern): the aim request
+                // runs through the game's assist before the controller.
+                let aim = em.node("TennisAutoAim", String::new());
+                em.edge(aim_src, aim_port, aim, "Vector31");
+                let mv = em.node("TennisAutoMove", String::new());
+                em.edge(move_vec, "Vector31", mv, "Vector31");
+                em.edge(aim, "Vector31", mv, "Vector32");
                 let n = em.node("TennisController", String::new());
-                em.edge(vec, "Vector31", n, "Vector31");
+                em.edge(mv, "Vector31", n, "Vector31");
                 if let Some(s) = swing {
                     wire_val(&mut em, &vals, *s, n, "Bool1");
                 }
@@ -460,13 +555,33 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
             Op::TennisMoveVec { v, swing, shot, sprint } => {
                 require_game(game, "tennis", "tennis_move_vec")?;
                 let n = em.node("TennisController", String::new());
+                // Same native assist chain as tennis_move (AutoAim ->
+                // AutoMove -> controller). Explicit tennis_aim wins for the
+                // aim request; else the move vector feeds both (legacy).
+                let (aim_src, aim_port) = match pending_aim.take() {
+                    Some(p) => p,
+                    None => match vals.get(*v) {
+                        Some(Val::Node(src, sport)) => (*src, *sport),
+                        Some(Val::Const(_)) => {
+                            return Err("tennis_move_vec of a constant float — source must be a vector".into());
+                        }
+                        None => return Err(format!("tennis_move_vec of unknown op id {v}")),
+                    },
+                };
+                let aim = em.node("TennisAutoAim", String::new());
+                let mv = em.node("TennisAutoMove", String::new());
                 match vals.get(*v) {
-                    Some(Val::Node(src, sport)) => em.edge(*src, sport, n, "Vector31"),
+                    Some(Val::Node(src, sport)) => {
+                        em.edge(*src, sport, mv, "Vector31");
+                    }
                     Some(Val::Const(_)) => {
                         return Err("tennis_move_vec of a constant float — source must be a vector".into());
                     }
                     None => return Err(format!("tennis_move_vec of unknown op id {v}")),
-                }
+                };
+                em.edge(aim_src, aim_port, aim, "Vector31");
+                em.edge(aim, "Vector31", mv, "Vector32");
+                em.edge(mv, "Vector31", n, "Vector31");
                 if let Some(s) = swing {
                     wire_val(&mut em, &vals, *s, n, "Bool1");
                 }
@@ -478,7 +593,46 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 }
                 vals.push(Val::Const(0.0)); // placeholder: op id alignment
             }
+            Op::TennisAim { x, z } => {
+                require_game(game, "tennis", "tennis_aim")?;
+                // Aim request only: the node is built by the next
+                // tennis_move (autoswitch — walk wire untouched). A second
+                // tennis_move would reuse a stale aim, so the frontend
+                // allows exactly one aim per tick; leftover pending here
+                // means aim-after-move, which is loud, not silent.
+                let vec = em.node("ConstructVector3", String::new());
+                wire_val(&mut em, &vals, *x, vec, "Float1");
+                wire_val(&mut em, &vals, *z, vec, "Float3");
+                if pending_aim.replace((vec, "Vector31")).is_some() {
+                    return Err(
+                        "tennis_aim twice without an intervening controller"
+                            .into(),
+                    );
+                }
+                vals.push(Val::Const(0.0)); // placeholder: op id alignment
+            }
+            Op::TennisAutoSwing { shot, mode } => {
+                require_game(game, "tennis", "tennis_auto_swing")?;
+                // Modifier is the mode label verbatim (save evidence:
+                // titanium54 stores 'Prefer Charge', not an index).
+                if mode != "Normal Only"
+                    && mode != "Prefer Charge"
+                    && mode != "Random"
+                {
+                    return Err(format!(
+                        "tennis_auto_swing mode {mode:?} — Normal Only | \
+                         Prefer Charge | Random"
+                    ));
+                }
+                let n = em.node("TennisAutoSwing", mode.clone());
+                wire_val(&mut em, &vals, *shot, n, "Float1");
+                vals.push(Val::Node(n, "Bool1"));
+            }
         }
+    }
+
+    if pending_aim.is_some() {
+        return Err("tennis_aim without a controller — pair it with a move".into());
     }
 
     // final flush: remaining pending writes (arrays never read)
@@ -1091,6 +1245,115 @@ mod tests {
     }
 
     #[test]
+    fn plot_emits_string_plus_timeplot_sink() {
+        // api.plot(channel, v): one String (modifier = channel) + one
+        // TimePlot sink; the value flows into Float1. Valid on every
+        // target including universal (no game API involved). Plot is a
+        // placeholder op, so later op ids must still wire correctly.
+        let ops = vec![
+            const_op(3.0),                                            // 0
+            Op::Plot { name: "CC.const".into(), v: 0 },               // 1
+            Op::Bin { r#fn: "AddFloats".into(), a: 0, b: 0, cmp: None }, // 2
+            Op::VarSet { name: "cnt".into(), v: 2 },                  // 3
+        ];
+        for (game, ver) in [("soccer", "v0.12"), ("universal", "v0")] {
+            let (save, _) = compile(&test_desc(game, ver, ops.clone()))
+                .expect("plot compiles on {game}");
+            let strings = kind_nodes(&save, "String");
+            assert_eq!(strings.len(), 1, "one channel node on {game}");
+            assert_eq!(node_modifier(strings[0]), "CC.const");
+            let plots = kind_nodes(&save, "TimePlot");
+            assert_eq!(plots.len(), 1, "one TimePlot sink on {game}");
+            // TimePlot.Float1 is fed by the plotted value (const 3.0).
+            let tp_ins: HashSet<String> =
+                node_port_sids(plots[0], false).into_iter().collect();
+            let mut float_feeders = 0;
+            let mut string_feeders = 0;
+            for c in save["serializableConnections"].as_array().unwrap() {
+                if tp_ins.contains(c["port1SID"].as_str().unwrap()) {
+                    match kind_of_port_owner(&save, c["port0SID"].as_str().unwrap()).as_str() {
+                        "Float" => float_feeders += 1,
+                        "String" => string_feeders += 1,
+                        k => panic!("TimePlot fed by unexpected {k}"),
+                    }
+                }
+            }
+            assert_eq!(float_feeders, 1, "value into Float1 on {game}");
+            assert_eq!(string_feeders, 1, "channel into String1 on {game}");
+        }
+        // Placeholder alignment: the add after the plot still sees const 3.0
+        // twice, and the SetVariable sees the add (not a shifted neighbor).
+        let (save, _) = compile(&test_desc("soccer", "v0.12", ops))
+            .expect("plot shape compiles");
+        let adds = kind_nodes(&save, "AddFloats");
+        assert_eq!(adds.len(), 1);
+        assert_eq!(
+            input_sources(&save, adds[0]),
+            vec![
+                ("Float".to_string(), "3".to_string()),
+                ("Float".to_string(), "3".to_string()),
+            ],
+            "add after plot wires const 3.0 + const 3.0"
+        );
+    }
+    #[test]
+    fn same_fp32_bits_share_one_float_node() {
+        // Frontend spellings 1, 1.0 (and True) all deserialize to f32
+        // 1.0; const_node dedupes by bits, so however many uses exist
+        // there is exactly one Float node. Rule: bit-equal => shared.
+        let ops = vec![
+            const_op(1.0),                                            // 0
+            const_op(1.0),                                            // 1 (dup)
+            Op::Bin { r#fn: "AddFloats".into(), a: 0, b: 1, cmp: None }, // 2
+            Op::Plot { name: "C".into(), v: 2 },                      // 3
+            Op::SoccerMove { x: 2, z: 0 },                            // 4
+        ];
+        let (save, _) = compile(&test_desc("soccer", "v0.12", ops))
+            .expect("join compiles");
+        let floats = kind_nodes(&save, "Float");
+        assert_eq!(
+            floats.len(), 1,
+            "one Float node for all 1.0 uses, got {floats:?}"
+        );
+        assert_eq!(node_modifier(floats[0]), "1");
+    }
+
+    #[test]
+    fn soccer_get_and_transform_pos_emit() {
+        // Soccer sensors lower like tennis ones (index modifier); pos_of
+        // is RelativePosition(World) turning a transform into a vector.
+        // transform_pos of a non-transform is loud (would miswire).
+        let ops = vec![
+            Op::SoccerGet { kind: "transform".into(), index: 1,      // 0
+                            label: "Team Player 1".into() },
+            Op::TransformPos { v: 0 },                               // 1
+            Op::VecSplit { v: 1, i: 0 },                             // 2
+            Op::Plot { name: "LIVE.x".into(), v: 2 },                // 3
+            Op::SoccerMove { x: 2, z: 2 },                           // 4
+        ];
+        let (save, _) = compile(&test_desc("soccer", "v0.12", ops))
+            .expect("soccer sensor chain compiles");
+        let gets = kind_nodes(&save, "SoccerGetTransform");
+        assert_eq!(gets.len(), 1);
+        assert_eq!(node_modifier(gets[0]), "1");
+        let rels = kind_nodes(&save, "RelativePosition");
+        assert_eq!(rels.len(), 1);
+        assert_eq!(node_modifier(rels[0]), "13");
+        // Tennis target rejects soccer sensors loudly.
+        let bad = compile(&test_desc("tennis", "v0.14", vec![
+            Op::SoccerGet { kind: "float".into(), index: 0,
+                            label: "Ball Speed".into() },
+        ]));
+        assert!(bad.is_err(), "soccer_get on tennis target must fail");
+        // transform_pos of a float const is loud.
+        let bad2 = compile(&test_desc("soccer", "v0.12", vec![
+            const_op(3.0),
+            Op::TransformPos { v: 0 },
+        ]));
+        assert!(bad2.is_err(), "transform_pos of a const must fail");
+    }
+
+    #[test]
     fn vec_split_shares_one_split_node() {
         // Two components of the same vector share one Vector3Split; the
         // controller sees split outputs, not the raw sensor.
@@ -1180,8 +1443,9 @@ mod tests {
 
     #[test]
     fn vec_make_and_move_vec_wire_vector() {
-        // vec_make builds one ConstructVector3 from 3 floats; the
-        // tennis_move_vec controller takes its Vector31, not x/z floats.
+        // vec_make builds one ConstructVector3 from 3 floats; the request
+        // drives the native assist chain (AutoAim -> AutoMove ->
+        // controller), not the controller directly.
         let ops = vec![
             const_op(1.0),                                            // 0
             const_op(0.0),                                            // 1
@@ -1198,23 +1462,33 @@ mod tests {
             float_source_modifiers(&save, makes[0]),
             vec!["0", "1", "3"]
         );
+        let aims = kind_nodes(&save, "TennisAutoAim");
+        let moves = kind_nodes(&save, "TennisAutoMove");
         let ctrls = kind_nodes(&save, "TennisController");
-        assert_eq!(ctrls.len(), 1);
-        let vec_ins: HashSet<String> = node_port_sids(ctrls[0], false)
-            .into_iter()
-            .collect();
-        let make_outs: HashSet<String> = node_port_sids(makes[0], true)
-            .into_iter()
-            .collect();
-        let linked = save["serializableConnections"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| {
-                make_outs.contains(c["port0SID"].as_str().unwrap())
-                    && vec_ins.contains(c["port1SID"].as_str().unwrap())
-            });
-        assert!(linked, "controller Vector31 comes from the vec_make node");
+        assert_eq!((aims.len(), moves.len(), ctrls.len()), (1, 1, 1));
+        let conns = save["serializableConnections"].as_array().unwrap();
+        let linked = |from_kind: &str, from_out: bool, to_kind: &str| -> bool {
+            let from: HashSet<String> =
+                kind_nodes(&save, from_kind).iter().flat_map(|n| {
+                    node_port_sids(n.clone(), from_out)
+                }).collect();
+            let to: HashSet<String> =
+                kind_nodes(&save, to_kind).iter().flat_map(|n| {
+                    node_port_sids(n.clone(), !from_out)
+                }).collect();
+            conns.iter().any(|c| {
+                from.contains(c["port0SID"].as_str().unwrap())
+                    && to.contains(c["port1SID"].as_str().unwrap())
+            })
+        };
+        assert!(linked("ConstructVector3", true, "TennisAutoAim"),
+                "aim assist reads the request vector");
+        assert!(linked("ConstructVector3", true, "TennisAutoMove"),
+                "movement reads the request vector");
+        assert!(linked("TennisAutoAim", true, "TennisAutoMove"),
+                "assist output feeds the mover");
+        assert!(linked("TennisAutoMove", true, "TennisController"),
+                "controller drives from the mover, not the raw request");
     }
 
     #[test]
@@ -1304,5 +1578,154 @@ mod tests {
         let mut bad = test_desc("soccer", "v0.12", vec![]);
         bad.schema = "graphc-desc-v0".into();
         assert!(compile(&bad).is_err());
+    }
+
+    /// Port sid of one node by (name, direction).
+    fn port_sid(n: &Value, name: &str, out: bool) -> String {
+        n["serializablePorts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| {
+                p["id"] == name && (p["polarity"].as_i64().unwrap() != 0) == out
+            })
+            .unwrap_or_else(|| panic!("no {} port {name:?}", if out { "output" } else { "input" }))
+            ["sID"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    fn feeds(save: &Value, from_sid: &str, to_sid: &str) -> bool {
+        save["serializableConnections"].as_array().unwrap().iter().any(|c| {
+            c["port0SID"] == from_sid && c["port1SID"] == to_sid
+        })
+    }
+
+    #[test]
+    fn tennis_aim_splits_walk_from_strike() {
+        // Explicit aim overrides the move vector for the assist input;
+        // the walk input keeps the move vector (autoswitch semantics:
+        // feet and target steer independently).
+        let ops = vec![
+            const_op(7.0),                                            // 0 aim x
+            const_op(0.0),                                            // 1 aim z
+            const_op(-14.0),                                          // 2 walk x
+            const_op(2.0),                                            // 3 walk z
+            Op::TennisAim { x: 0, z: 1 },                            // 4
+            Op::TennisMove { x: 2, z: 3, swing: None,                // 5
+                             shot: None, sprint: None },
+        ];
+        let (save, _) = compile(&test_desc("tennis", "v0.14", ops))
+            .expect("aim+move compiles");
+        assert_eq!(kind_nodes(&save, "TennisAutoAim").len(), 1);
+        assert_eq!(kind_nodes(&save, "TennisAutoMove").len(), 1);
+        assert_eq!(kind_nodes(&save, "TennisController").len(), 1);
+        let vecs = kind_nodes(&save, "ConstructVector3");
+        assert_eq!(vecs.len(), 2, "aim vec and move vec stay distinct");
+        let aim_node = kind_nodes(&save, "TennisAutoAim")[0];
+        let move_node = kind_nodes(&save, "TennisAutoMove")[0];
+        let ctrl = kind_nodes(&save, "TennisController")[0];
+        // Aim assist reads the AIM vec (first ConstructVector3).
+        assert!(
+            feeds(&save, &port_sid(vecs[0], "Vector31", true),
+                  &port_sid(aim_node, "Vector31", false)),
+            "AutoAim input is the aim request, not the walk target"
+        );
+        // Walk input reads the MOVE vec (second ConstructVector3).
+        assert!(
+            feeds(&save, &port_sid(vecs[1], "Vector31", true),
+                  &port_sid(move_node, "Vector31", false)),
+            "AutoMove walk input is the move target"
+        );
+        assert!(
+            feeds(&save, &port_sid(aim_node, "Vector31", true),
+                  &port_sid(move_node, "Vector32", false)),
+            "assist output feeds the mover aim input"
+        );
+        assert!(
+            feeds(&save, &port_sid(move_node, "Vector31", true),
+                  &port_sid(ctrl, "Vector31", false)),
+            "controller drives from the mover"
+        );
+    }
+
+    #[test]
+    fn tennis_aim_ordering_is_loud() {
+        // Aim after the controller (or twice, or orphaned) fails loudly —
+        // a stale aim must never silently steer a later strike.
+        let move_first = vec![
+            const_op(1.0),
+            const_op(2.0),
+            Op::TennisMove { x: 0, z: 1, swing: None,
+                             shot: None, sprint: None },
+            Op::TennisAim { x: 0, z: 1 },
+        ];
+        assert!(
+            compile(&test_desc("tennis", "v0.14", move_first)).is_err(),
+            "aim after move must fail"
+        );
+        let double_aim = vec![
+            const_op(1.0),
+            const_op(2.0),
+            Op::TennisAim { x: 0, z: 1 },
+            Op::TennisAim { x: 0, z: 1 },
+            Op::TennisMove { x: 0, z: 1, swing: None,
+                             shot: None, sprint: None },
+        ];
+        assert!(
+            compile(&test_desc("tennis", "v0.14", double_aim)).is_err(),
+            "double aim must fail"
+        );
+        let orphan = vec![
+            const_op(1.0),
+            const_op(2.0),
+            Op::TennisAim { x: 0, z: 1 },
+        ];
+        assert!(
+            compile(&test_desc("tennis", "v0.14", orphan)).is_err(),
+            "aim without controller must fail"
+        );
+    }
+
+    #[test]
+    fn tennis_auto_swing_emits_prefer_charge() {
+        // Modifier is the mode label verbatim (titanium54 save evidence);
+        // shot wires in, swing bool comes out.
+        let ops = vec![
+            const_op(2.0),                                            // 0 shot
+            Op::TennisAutoSwing { shot: 0,                            // 1
+                                  mode: "Prefer Charge".into() },
+        ];
+        let (save, _) = compile(&test_desc("tennis", "v0.14", ops))
+            .expect("auto_swing compiles");
+        let swings = kind_nodes(&save, "TennisAutoSwing");
+        assert_eq!(swings.len(), 1);
+        assert_eq!(node_modifier(swings[0]), "Prefer Charge");
+        let floats = kind_nodes(&save, "Float");
+        assert_eq!(floats.len(), 1);
+        assert!(
+            feeds(&save, &port_sid(floats[0], "Float1", true),
+                  &port_sid(swings[0], "Float1", false)),
+            "shot const feeds the swing node input"
+        );
+        // Unknown mode + wrong target fail loudly.
+        let bad_mode = vec![
+            const_op(2.0),
+            Op::TennisAutoSwing { shot: 0, mode: "Berserk".into() },
+        ];
+        assert!(
+            compile(&test_desc("tennis", "v0.14", bad_mode)).is_err(),
+            "unknown swing mode must fail"
+        );
+        let bad_target = vec![
+            const_op(2.0),
+            Op::TennisAutoSwing { shot: 0,
+                                  mode: "Prefer Charge".into() },
+        ];
+        assert!(
+            compile(&test_desc("soccer", "v0.12", bad_target)).is_err(),
+            "auto_swing on soccer target must fail"
+        );
     }
 }

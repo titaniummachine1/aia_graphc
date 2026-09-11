@@ -1,5 +1,81 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 7 (2026-09-11, compiler track: assist chain + underdog + battery)
+
+User stress-testing the API: the first underdog held swing forever (charges,
+never releases, never serves — hold-to-charge/release-to-strike was only
+prose). Fixes, all verified:
+
+1. ✅ Misuse battery materialized (`graphc/tests/test_misuse.py`, was
+   vapor): 29 loud cases + project rules (two ticks, conflicting consts)
+   + legit-pattern guards, runnable via plain `python`. First run caught
+   a REAL hole: same-cell double `arr_set` compiled silently (backend
+   last-wins). Frontend now rejects it (`_set_cells`, same pattern as
+   `_set_vars`); legit multi-index packing untouched. 29/29 + rules green.
+2. ✅ `tennis_move`/`tennis_move_vec` route through the native assist
+   chain (request -> TennisAutoAim -> TennisAutoMove(V32) + request ->
+   AutoMove(V31) -> controller), the titanium pattern. PORTS entries
+   copied exact from AIGamePyLibrary `data.ports`. Swing stays direct
+   (AutoSwing would replace the bot's charge gate). Backend 11/11
+   (wire test now asserts the chain); sim replays bit-identical
+   (pass-through) — both demo replays green on rebuilt saves.
+3. ✅ Underdog (`examples/underdog/`, 20 lines): serve legal target,
+   rally deep-middle, swing = `chg >= 0.7 ? release : in_range`.
+   17 ops / 18 nodes / 39 transitions, deployed to Saves as
+   `underdog.txt`. Sim: 7-0 vs titanium54 (both sides), 7-0 vs aia3,
+   0 faults — serves land box-center, toss hangs game-style while
+   charging. CAVEAT (recorded, not hidden): titanium sprays wide shots
+   OUT in-sim (also 0-7 vs graphc_rival) — almost certainly a sim
+   flight/assist gap (game AutoAim correction unmodeled), NOT proven
+   strength. Game run needed for the honest verdict.
+4. ✅ Costs re-pinned (assist +2 nodes/+5 transitions per controller):
+   tennis demo 15n/35t (was 30t), serve-latch 15n/32t (was 27t),
+   rival 19n/41t (was 17n/36t), soccer 83 unchanged. Rival still 7-0
+   vs aia3 on the rebuilt save. README + `t.move` stub docs updated
+   (assist routing, hold/release swing rule); pycache purged.
+
+## Session 8 (2026-09-11, compiler track: split drive from pylibry reference)
+
+User correction (right on all counts): the bot walked to its aim (off the
+board), couldn't follow the ball, and never touched AutoSwitch/AutoSwing —
+plus "watch upstream and our pylibry, what nodes it has, how they are
+supposed to be used, as main reference". Did exactly that. Reference
+findings (`nodes.py` docstrings, identical upstream/local):
+- `TennisAutoSwitch(position, aim)` (= `TennisAutoMove` alias): "raw
+  controller Vector31 is read as *either* a move destination (own half)
+  *or* an aim landing (opponent half), **never both** — this node is how
+  you steer feet and target independently." Single-vector `t.move` was
+  wrong by construction; "Controller ports expect AutoMove/AutoSwing".
+- `TennisAutoSwing(shot_type, mode)`: Normal Only | Prefer Charge |
+  Random; Prefer Charge "holds once Is Ball Playable is true and releases
+  at the contact window". Modifier stored as the LABEL (titanium54 save
+  evidence: `'Prefer Charge'`, not an index).
+- `TennisAutoAim(direction=None)`: "legal opponent-court landing" (the
+  node itself constrains — supports the wide-aim correction hypothesis).
+- Sensor side semantics (recovered native headers + old titanium bots):
+  Center Of Half/Back read OWN half — rival/underdog aims were own-half
+  wires (rejected by sim latch → fallback; in game they'd be move
+  destinations). Aim at far half = negate x.
+Fixes, all verified:
+1. ✅ New author calls: `api.tennis_aim(x, z)` / `t.aim(x, z)` (aim
+   request for the NEXT move; one per tick, aim-without-move loud,
+   aim-after-move loud in backend) and `api.tennis_auto_swing(shot,
+   mode='Prefer Charge')` / `t.auto_swing(...)` (bool out; mode
+   validated loudly). Backend: AutoAim/AutoSwing nodes, pending-aim
+   consumed by the next controller, legacy fallback (move vec feeds
+   both) when no aim call — old bots compile byte-identical graphs.
+   Backend 14/14 (aim-split, aim-ordering, autoswing tests).
+2. ✅ Underdog v4 (`examples/underdog/`): walk = stance on serve,
+   predicted bounce while `ball_incoming()`, own back-center otherwise
+   (never chases its own shot across the net or a dead ball); aim =
+   legal target on serve, mirrored deep-middle otherwise; swing =
+   `auto_swing(2.0)`. 26 ops / 25 nodes / 60 transitions, deployed.
+   Sim vs aia3: 5-3 points, game 1-0, 0 faults, stays own half
+   (rally x in [-16.6, -5.08]), serves land box-center.
+3. ✅ Full-name aliases landed (`set_array_cell`, `split_vector`,
+   `position_of`, …): both spellings compile byte-identical (pinned by
+   test); examples + docs migrated, shorts still accepted.
+
 ## Done this session (all verified)
 
 1. ✅ Deleted `graphc/core.py`, trimmed `graphc/__init__.py` (now exports
@@ -229,3 +305,91 @@ serve-latch parity bot 27.
    (per-row AIA_FIRST_SERVER + resume-safe skip). Full 78 replay with
    partial table: 27/78 = 34.6% (baseline 25/78). Table completion (~60
    rows, `table_build.py`) continues to be the honest-parity lever.
+
+## Session 5 (2026-09-11, compiler track: simple-to-use hardening)
+
+1. ✅ Type-checked connections: every SSA value typed
+   (float/bool/vector/transform/array) in `graphc/ast_fe.py`; illegal
+   node wiring fails loudly at compile time (bool into arithmetic,
+   vector into float slots, transform into vec_split/move_vec, float
+   as if-cond/swing/sprint, mixed if/else arm types, set_var/arr_set
+   non-floats). Verified: 6/6 illegal probes loud, legal bots green.
+2. ✅ Node input/output reference: new `graphc/nodes.py` (NODE_DOCS for
+   all 18 emitted kinds + IR_OPS for all 16 desc ops) — LLM-readable,
+   single source of truth; referenced from `graphc/__init__.py`.
+3. ✅ Stub docs with types: `gen_api.py` emits Vector3/Transform marker
+   classes, `-> bool/float/Vector3/Transform` annotations, and per-sensor
+   Returns + game-node + label docstrings (tennis 108x2, soccer 175
+   regenerated). move/move_vec document arg types + auto-wiring.
+4. ✅ Auto-wiring guarantee kept + documented: authors write values only,
+   never nodes/ports/wires. Verified: demos rebuild identical
+   (soccer 83, tennis 30, serve-latch 27 transitions), project example
+   18 ops, `cargo test --lib` 8 green.
+
+## Session 6 (2026-09-11, compiler track: debug sinks, loops, recursion, soccer reads)
+
+Cost model refined (user directive, binding): LEXICOGRAPHIC — minimize
+per-tick transitions first (tick-invariant: every op fires once per think,
+so the static count IS the average); only among transition-equal options
+pick the smallest file. Unrolling never reduces transitions (N trips x body
+either way — no rolled form exists in the graph language, and both select
+arms evaluate, so inactive trips still fire); it preserves this-tick
+semantics, and the optimizer then minimizes the flat form. Across-ticks
+latch machines are the transitions-cheap alternative (author's choice).
+
+1. ✅ `api.plot(channel, value)` (TimePlot sink, all targets incl.
+   universal): frontend + desc (`plot` op, DCE sink) + nodes.py docs +
+   backend (String + 6-port TimePlot). Misuse battery 6/6 loud;
+   DCE keeps plotted / drops dead verified. Backend suite 9 green.
+2. ✅ Bounded control flow (all in ast_fe.py, flat graph out, no backend
+   change): `for i in range(literal)` unrolled (break/continue via
+   select-gating, exact-trip loops emit zero overhead); `while cond`
+   unrolled to 128 + `!!while_overflow` canary (burns the cap every tick
+   — documented, prefer latches); recursion inlines to depth 32 +
+   `!!recursion_overflow` canary (house style with conditional calls AND
+   guard-clause early returns via _FnReturn protocol). Sinks in loop /
+   recursive bodies fail loudly (hoist). Caps: 4096 trips, 100k ops,
+   lowering-depth guard trips x depth <= 1000 (Windows 1MB main-thread
+   stack overflows past it — measured STATUS_STACK_OVERFLOW, then
+   calibrated).
+3. ✅ SCCP-lite static domain (ints abs < 2**24, bools): branch pruning
+   ONLY, values still lower as floats (bit-identity untouched). Effects
+   measured: gcd(48,18) 171 -> 4 ops, fib(6) tree 42 ops exact both
+   shapes, fib(20) exact 32841 ops, for-break loop 123 -> 10 ops.
+   Fixed latent bug: bool consts shared _desc ops with floats (type tags
+   flipped with emission order) — dedicated ops now.
+4. ✅ fp32-bits join rule (user directive): same bits => same node.
+   Verified `1`/`1.0` share one Float node; backend test
+   `same_fp32_bits_share_one_float_node`; frontend
+   `graphc/tests/test_const_join.py`. Backend suite 11 green.
+5. ✅ `soccer_get` backend lowering DONE (Session 4 item 5 closed):
+   bool/float/vector3/transform + `api.pos_of` (RelativePosition World,
+   modifier 13). Index order verified equal both sides
+   (Team Player 1 == 1). Frontend `api.soccer_get_*(label)` +
+   `api.pos_of(t)`, misuse-loud. Backend test
+   `soccer_get_and_transform_pos_emit`.
+6. ✅ Live probe `fib(position.x) -> debug` (sim side
+   data/compiler_probes/live_position_fib.txt): Team Player 1 transform
+   -> pos -> x -> fib table 0..19 -> LIVE.x/mi/fib plots. Sim-verified
+   (x=-0.9506 -> mi=19 -> 4181 exact). Property is self-consistency per
+   tick (holds in any world) — the game-vs-sim check.
+7. ✅ Sim-side handoff (aia_comp-sim): scripts/run_compiler_probe.py
+   builds both fixtures; tests/compiler_probe.rs pins goldens + costs
+   (probe 94 nodes / O0 91 / O1 80; live 94 / 94 / 85) + 40-tick live
+   self-consistency; scripts/compare_compiler_probe.py scores a game
+   TimePlot export (static exact + order canaries + LIVE relations).
+   Game procedure: load .txt as team, record TimePlot, export, compare.
+8. ✅ Call-eval-order bug (found by values run: V.gcd read 18, want 6):
+   params bound into the shared env one-by-one, clobbering caller locals
+   later args still read (gcd(b, a%b) lowered as gcd(b, b%b)). Args now
+   all evaluate in caller env before any param binds. Pinned by
+   graphc/tests/test_calls.py (arg order + recursive gcd/fib shapes).
+9. ✅ Lowering-chain guard (measured, not guessed): desc demand-chain
+   depths vs sim on Windows 1MB main thread — 129/321/513/641 pass,
+   1540 kills the process (STATUS_STACK_OVERFLOW, uncatchable). Guard at
+   800 in _assemble (loud + actionable). Consequence: while cap 128 -> 64
+   (128 x typical bodies exceed the guard; 64 x 12 = 768 fits). Values
+   run green end-to-end: breaksum 6, contsum 3, while 0.78125 + clean
+   canary, fib6 8, gcd 6.
+   Sim-side principled fix (handed off, not done here): explicit heap
+   work-stack in the sim lowerer instead of call-stack recursion.

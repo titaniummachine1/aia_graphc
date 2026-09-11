@@ -15,13 +15,18 @@ Usage (authoring path: plain Python -> description IR -> graphc-rs backend):
 Rules (enforced at trace time — the supported-API whitelist):
    - Only the api.* surface + project code + arithmetic on traced values;
      anything untraceable fails loudly with a pointing error, never
-     silently misbehaves. A 30-misuse battery pins this: shadowed api,
-     double controllers/latches, stdlib imports, wrong game/version,
-     unknown sensors, while/for, and/or, ternaries, subscripts, walrus,
-     recursion — all loud.
+     silently misbehaves. A 29-case misuse battery pins this
+     (graphc/tests/test_misuse.py): shadowed api, double
+     controllers/latches, stdlib imports, wrong game/version, unknown
+     sensors, boolop/ternary/subscript/walrus, jumps outside loops,
+     non-literal range, sinks in loop bodies, bad arity, top-level
+     statements, conflicting constants — all loud.
    - Dynamic `if` is real syntax (SSA phi-merge via select nodes);
-     dynamic `while`/`for` are rejected — express state across ticks with
-     api.set_var (both arms evaluate per tick — semantics match the game).
+     bounded `for i in range(literal)` / `while` (cap 64) / recursion
+     (depth 32) unroll inline to flat graphs (overflow canaries, sinks
+     hoisted out); cross-tick state lives in api.var/api.set_var latches
+     and api.array cells (both arms evaluate per tick — semantics match
+     the game).
    - Multi-file projects via compile_project (imports resolved, functions
      inlined); per-(game,version) API: import AIA_Comp_Libry.tennis.v014
      (or unversioned .tennis = latest). Version mismatch fails loudly.
@@ -29,10 +34,20 @@ Rules (enforced at trace time — the supported-API whitelist):
      target tables (sensors/controllers differ per version). A "universal"
      target exists for unknown games: raw node emission only, no game API.
    - Cross-tick memory: api.var/api.set_var (named latch, written once per
-     tick) and api.array + api.arr_set/arr_get/arr_get_dyn (packed
+     tick) and api.array + api.set_array_cell/get_array_cell/get_array_cell_dynamic (packed
      Vector3 cells). One controller call per tick.
+   - Debug: api.plot(channel, value) (TimePlot sink, all targets) — the
+     compiler-verification surface (game TimePlot export == sim == pure VM).
 Cost model: per-tick node transitions (nodes + edges) — the C# per-tick
 overhead metric. graphc-rs prints the report; CI fails on regressions.
+
+Simple-use contract (humans + LLMs): write plain Python with the
+AIA_Comp_Libry API (import AIA_Comp_Libry.tennis.v15f as t); every value
+is typed (float/bool/vector/transform/array — see graphc.nodes), every
+connection is checked, and illegal wiring fails at compile time with a
+pointing error. You never name a node, port, or wire. Node input/output
+reference lives in graphc.nodes (NODE_DOCS/IR_OPS); per-sensor docs with
+return types live on the generated stubs (hover in any IDE).
 """
 from __future__ import annotations
 

@@ -29,26 +29,35 @@ json.dump(desc, open("mybot.desc.json", "w"))
 subprocess.run(["graphc-rs", "mybot.desc.json", "mybot.txt"], check=True)
 ```
 
-Drop `mybot.txt` into `[game]/AIComp_Data/Saves/Tennis/`, load `mybot`
-in the node editor. Done — it serves, rallies, and swings.
+Drop `mybot.txt` into `%USERPROFILE%\AppData\LocalLow\Unicorn One\AIComp\Saves\Tennis\`,
+load `mybot` in the node editor. Done — it serves, rallies, and swings.
 
-Three commands, total:
+Three commands, total (no install — run from the repo checkout):
 ```
-python -m pip install <this repo>   # once (needs GRAPHC_PYLIB, see below)
+cd <graphc checkout>                                  # once (everything runs in place)
 compile_project("mybot/entry.py", ("tennis", "v15f"))   # bot -> graph IR
 graphc-rs mybot.desc.json mybot.txt                     # graph IR -> game save
 ```
+`graphc-rs` is `cargo build --release` in this repo
+(`target/release/graphc-rs`); sensors resolve via `GRAPHC_PYLIB`
+(defaults to the sibling AIGamePyLibrary checkout, see below).
 
 ## How it works (the 1-minute version)
 
 - `tick(api)` runs once per game tick. Read the game through `t.*`
-  sensors (`t.ball_speed()`), answer through `t.move(...)`.
+  sensors (`t.ball_speed()`), answer through `t.move(...)` (walk target)
+  + `t.aim(...)` (strike target — the game switches aim without touching
+  how you walk) + `t.auto_swing(...)` (hold builds charge, release
+  strikes).
+  `api.plot("channel", value)` records a TimePlot debug value — readable
+  in game (TimePlot export), sim, and pure VM. It is the compiler-
+  verification surface: examples/compiler_probe keeps golden values.
 - `import AIA_Comp_Libry.tennis as t` = latest tennis(nodes). Pin an
   exact version with `import AIA_Comp_Libry.tennis.v014 as t` instead.
   Wrong version for your target fails at compile time, loudly.
 - Plain Python otherwise: helpers in any file (`import aim` just works),
   arithmetic, `if/else`, named memory (`api.var` / `api.set_var`),
-  arrays (`api.array` + `arr_set` / `arr_get`). One controller call
+  arrays (`api.array` + `set_array_cell` / `get_array_cell`). One controller call
   (`t.move`) per tick.
 - Anything the compiler cannot turn into nodes fails HERE with a pointing
   error — never a silently different bot. If your AI misbehaves in game,
@@ -56,11 +65,17 @@ graphc-rs mybot.desc.json mybot.txt                     # graph IR -> game save
 
 ## The guarantee (idiot-proofing)
 
-30-misuse battery, all loud, zero silent miscompiles: shadowed `api`,
-double controllers / double latch writes, stdlib imports, wrong game or
-version, unknown sensors, tuple unpacking, `while`/`for`, `and`/`or`,
-ternaries, subscripts, walrus, recursion, top-level statements,
-conflicting constants across files. Behaviour in game == behaviour coded.
+29-case misuse battery (`graphc/tests/test_misuse.py`, run it directly —
+all loud, zero silent miscompiles): shadowed `api`, double controllers /
+double latch writes (same cell twice), stdlib/star/missing imports, wrong
+game or version, unknown sensors, tuple unpacking, `and`/`or`, ternaries,
+subscripts, walrus, chained comparisons, `break` outside loops,
+non-literal `range`, sinks inside loop bodies, missing returns, bad arity,
+undefined names, top-level statements, plus project rules (one `tick`,
+no conflicting constants). Bounded `for range(literal)` / `while` (64) /
+recursion (depth 32) are real and unroll inline — over-cap, sink-in-body,
+and depth-guard trips fail loudly with overflow canaries, never silently.
+Behaviour in game == behaviour coded.
 
 ## API reference
 
@@ -82,7 +97,10 @@ mybot/
   consts.py     # SECOND_SERVE_SHORTEN = 0.5
 ```
 Rules: one `tick(api)`, helpers return one float each, numeric constants
-at top level, no `while`/`for` (state lives across ticks in latches).
+at top level. Bounded loops are fine (`for i in range(19)`, `while` cap
+64, recursion depth 32 — all unroll to flat graphs with `!!` overflow
+canaries); cross-tick state lives in latches (`api.var`/`set_var`), and
+sinks (`move`/`plot`/`set_var`) hoist out of loop bodies.
 
 ## Under the hood (only if you care)
 
@@ -106,7 +124,12 @@ assumed v0.14-identical until measured.
 - `GRAPHC_PYLIB` points at the AIGamePyLibrary checkout (sensor ABI);
   defaults to `C:\gitProjects\AIA_tennis\AIGamePyLibrary`.
 - Regenerate stubs: `python graphc/api/gen_api.py`.
-- Tests: `cargo test --lib` (backend, 8 green). Python batteries live in
-  the sim session; the 30-misuse battery is `idiot.py` there.
+- Tests: `cargo test --lib` (backend, 11 green);
+  `python graphc/tests/test_misuse.py` (misuse battery),
+  `test_calls.py` (call/closure semantics), `test_const_join.py`
+  (float bit-identity) — all runnable directly, no pytest needed.
 - Example rival bot: `examples/serve_latch_proj/` -> `graphc_rival.txt`
-  (17 nodes, 36 transitions, beats aia3 7-0 in sim).
+  (19 nodes, 41 transitions, beats aia3 7-0 in sim).
+- Example underdog: `examples/underdog/` (walk-to-incoming-bounce,
+  mirrored deep aim, AutoSwing — 26 ops, 25 nodes, 60 transitions).
+  In `Saves\Tennis\underdog.txt`, loadable in the node editor.

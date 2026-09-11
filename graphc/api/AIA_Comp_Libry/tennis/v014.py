@@ -1,5 +1,17 @@
 """Author API for target ('tennis', 'v0.14') — GENERATED, do not edit.
 
+Simple to use (humans + LLMs): import this module, call its
+functions as plain values, and pass them to move()/move_vec().
+You NEVER wire nodes, ports, or connections — the compiler assigns
+every value a type (float/bool/vector/transform), checks every
+connection, and emits the game save. Illegal wiring (bool into
+arithmetic, vector into a float slot, transform into vec_split,
+float where bool is needed) fails at compile time, loudly.
+
+Types: float = number, bool = true/false, vector = 3D point
+(split with api.vec_split or feed move_vec), transform = placed
+object (opaque: Self/Opponent/Ball — pick a vector3 sensor instead).
+
 Import this in bot projects instead of raw api.* strings:
     import AIA_Comp_Libry.tennis.v014 as t
 The compiler maps these to the same ops as the api.* calls.
@@ -7,6 +19,14 @@ The compiler maps these to the same ops as the api.* calls.
 from __future__ import annotations
 
 TARGET = ('tennis', 'v0.14')
+
+class Vector3:
+    """Opaque 3D point: split via api.vec_split(v, 0/1/2) or feed
+    t.move_vec(v). Never arithmetic directly."""
+
+class Transform:
+    """Opaque placed object (Self/Opponent/Ball): cannot split or
+    do math on it; use a vector3 sensor instead."""
 
 _SENSORS = {
     'ball': ('transform', 'Ball'),
@@ -121,443 +141,895 @@ _SENSORS = {
 
 __all__ = ['ball', 'ball_has_bounced', 'ball_has_charged_effect', 'ball_in_swing_range', 'ball_incoming', 'ball_on_self_side', 'ball_position', 'ball_speed', 'ball_time_to_2nd_bounce', 'ball_time_to_ground', 'ball_velocity', 'camera', 'camera_forward', 'camera_right', 'center_of_back', 'center_of_half', 'court_depth', 'court_width', 'current_simulation_time', 'delta_time', 'deuce_fatigue', 'estimated_opponent_shot_location', 'fixed_delta_time', 'is_ad_court_serve', 'is_ball_playable', 'is_break_point', 'is_deuce', 'is_game_point', 'is_home', 'is_match_point', 'is_opponent_charging', 'is_opponent_server_for_set', 'is_opponent_winning', 'is_playing', 'is_second_serve', 'is_self_actively_serving', 'is_self_charging', 'is_self_server_for_set', 'is_self_winning', 'is_serve_phase', 'is_tied', 'legal_serve_target', 'must_wait_for_bounce', 'net_height', 'opponent', 'opponent_aces', 'opponent_average_scoring_location', 'opponent_charged_shots', 'opponent_double_faults', 'opponent_faults', 'opponent_fouls', 'opponent_outs', 'opponent_points', 'opponent_scored_last_point', 'opponent_set_score', 'opponent_stamina_pct', 'opponent_swing_charge_pct', 'predicted_2nd_bounce', 'predicted_bounce', 'rally_fatigue', 'random_aim_target', 'receive_stance', 'self', 'self_aces', 'self_average_scoring_location', 'self_charged_shots', 'self_double_faults', 'self_faults', 'self_fouls', 'self_has_advantage', 'self_outs', 'self_points', 'self_racket_center', 'self_scored_last_point', 'self_set_score', 'self_stamina_pct', 'self_swing_charge_pct', 'self_time_to_destination', 'serve_number', 'serve_stance', 'shot_ball', 'shot_curve_left', 'shot_curve_right', 'shot_drop', 'shot_flat', 'shot_last_opponent_shot', 'shot_last_self_shot', 'shot_lob', 'shot_most_scored_opponent_shot', 'shot_most_scored_self_shot', 'shot_most_used_opponent_shot', 'shot_most_used_self_shot', 'shot_random', 'shot_slice', 'shot_topspin', 'sim_tick', 'trick_curve_left_modifier', 'trick_curve_right_modifier', 'trick_drop_modifier', 'trick_lob_modifier', 'was_last_shot_curve_left', 'was_last_shot_curve_right', 'was_last_shot_drop', 'was_last_shot_flat', 'was_last_shot_lob', 'was_last_shot_slice', 'was_last_shot_topspin', 'was_last_shot_trick', 'move', 'move_vec']
 
-def ball() -> object:
-    """Ball position. Game label: 'Ball'."""
+def ball() -> Transform:
+    """Ball position.
+
+    Returns: transform (game node TennisGetTransform).
+    Game label: 'Ball'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_has_bounced() -> bool:
-    """True once the ball bounced since the last strike. Game label: 'Ball Has Bounced'."""
+    """True once the ball bounced since the last strike.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Ball Has Bounced'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_has_charged_effect() -> bool:
-    """True when a charged-shot effect rides the ball. Game label: 'Ball Has Charged Effect'."""
+    """True when a charged-shot effect rides the ball.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Ball Has Charged Effect'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_in_swing_range() -> bool:
-    """True when the ball is within strike radius. Game label: 'Ball In Swing Range'."""
+    """True when the ball is within strike radius.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Ball In Swing Range'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_incoming() -> bool:
-    """True only while the opponent's shot travels un-bounced toward you; goes false at the first bounce. Game label: 'Ball Incoming'."""
+    """True only while the opponent's shot travels un-bounced toward you; goes false at the first bounce.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Ball Incoming'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_on_self_side() -> bool:
-    """True when the ball is over your half. Game label: 'Ball On Self Side'."""
+    """True when the ball is over your half.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Ball On Self Side'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def ball_position() -> object:
-    """Ball court position (x, z). Game label: 'Ball Position'."""
+def ball_position() -> Vector3:
+    """Ball court position (x, z).
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Ball Position'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_speed() -> float:
-    """Current ball speed. Game label: 'Ball Speed'."""
+    """Current ball speed.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Ball Speed'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_time_to_2nd_bounce() -> float:
-    """Predicted seconds until the second bounce. Game label: 'Ball Time To 2nd Bounce'."""
+    """Predicted seconds until the second bounce.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Ball Time To 2nd Bounce'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def ball_time_to_ground() -> float:
-    """Predicted seconds until the ball lands. Game label: 'Ball Time To Ground'."""
+    """Predicted seconds until the ball lands.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Ball Time To Ground'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def ball_velocity() -> object:
-    """Ball velocity vector. Game label: 'Ball Velocity'."""
+def ball_velocity() -> Vector3:
+    """Ball velocity vector.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Ball Velocity'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def camera() -> object:
-    """Camera position. Game label: 'Camera'."""
+def camera() -> Transform:
+    """Camera position.
+
+    Returns: transform (game node TennisGetTransform).
+    Game label: 'Camera'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def camera_forward() -> object:
-    """Camera facing direction. Game label: 'Camera Forward'."""
+def camera_forward() -> Vector3:
+    """Camera facing direction.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Camera Forward'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def camera_right() -> object:
-    """Camera right direction. Game label: 'Camera Right'."""
+def camera_right() -> Vector3:
+    """Camera right direction.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Camera Right'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def center_of_back() -> object:
-    """Middle of your back court. Game label: 'Center Of Back'."""
+def center_of_back() -> Vector3:
+    """Middle of your back court.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Center Of Back'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def center_of_half() -> object:
-    """Middle of your half (safe rally target). Game label: 'Center Of Half'."""
+def center_of_half() -> Vector3:
+    """Middle of your half (safe rally target).
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Center Of Half'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def court_depth() -> float:
-    """Playable court length (baseline to baseline). Game label: 'Court Depth'."""
+    """Playable court length (baseline to baseline).
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Court Depth'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def court_width() -> float:
-    """Playable court width (singles). Game label: 'Court Width'."""
+    """Playable court width (singles).
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Court Width'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def current_simulation_time() -> float:
-    """Match clock in seconds. Game label: 'Current Simulation Time'."""
+    """Match clock in seconds.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Current Simulation Time'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def delta_time() -> float:
-    """Frame delta in seconds. Game label: 'Delta Time'."""
+    """Frame delta in seconds.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Delta Time'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def deuce_fatigue() -> float:
-    """Fatigue factor active at deuce. Game label: 'Deuce Fatigue'."""
+    """Fatigue factor active at deuce.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Deuce Fatigue'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def estimated_opponent_shot_location() -> object:
-    """Game's guess at their landing spot. Game label: 'Estimated Opponent Shot Location'."""
+def estimated_opponent_shot_location() -> Vector3:
+    """Game's guess at their landing spot. STALE outside the post-own-hit receive window (compiler warns) — prefer predicted_bounce for walking.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Estimated Opponent Shot Location'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def fixed_delta_time() -> float:
-    """Physics tick delta in seconds. Game label: 'Fixed Delta Time'."""
+    """Physics tick delta in seconds.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Fixed Delta Time'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ad_court_serve() -> bool:
-    """True when serving from the ad (left) side. Game label: 'Is Ad Court Serve'."""
+    """True when serving from the ad (left) side.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Ad Court Serve'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_ball_playable() -> bool:
-    """True when the ball is live and can be struck. Game label: 'Is Ball Playable'."""
+    """True when the ball is live and can be struck.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Ball Playable'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_break_point() -> bool:
-    """True when the receiver can break serve next point. Game label: 'Is Break Point'."""
+    """True when the receiver can break serve next point.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Break Point'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_deuce() -> bool:
-    """True at deuce (3+ points each, no advantage). Game label: 'Is Deuce'."""
+    """True at deuce (3+ points each, no advantage).
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Deuce'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_game_point() -> bool:
-    """True when the next point wins the game for either side. Game label: 'Is Game Point'."""
+    """True when the next point wins the game for either side.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Game Point'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_home() -> bool:
-    """True when this brain plays the home side. Game label: 'Is Home'."""
+    """True when this brain plays the home side.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Home'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_match_point() -> bool:
-    """True when the next point wins the match for either side. Game label: 'Is Match Point'."""
+    """True when the next point wins the match for either side.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Match Point'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_charging() -> bool:
-    """True while the opponent holds swing. Game label: 'Is Opponent Charging'."""
+    """True while the opponent holds swing.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Opponent Charging'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_server_for_set() -> bool:
-    """True when the opponent serves this set. Game label: 'Is Opponent Server For Set'."""
+    """True when the opponent serves this set.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Opponent Server For Set'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_opponent_winning() -> bool:
-    """True when the opponent leads the score. Game label: 'Is Opponent Winning'."""
+    """True when the opponent leads the score.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Opponent Winning'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_playing() -> bool:
-    """True while the match simulation runs (not menus). Game label: 'Is Playing'."""
+    """True while the match simulation runs (not menus).
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Playing'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_second_serve() -> bool:
-    """True when the upcoming serve is the second (after a fault). Game label: 'Is Second Serve'."""
+    """True when the upcoming serve is the second (after a fault).
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Second Serve'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_self_actively_serving() -> bool:
-    """True when self is the current server. Game label: 'Is Self Actively Serving'."""
+    """True when self is the current server.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Self Actively Serving'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_self_charging() -> bool:
-    """True while self holds swing (charge 0.17-1.0). Game label: 'Is Self Charging'."""
+    """True while self holds swing (charge 0.17-1.0).
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Self Charging'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_self_server_for_set() -> bool:
-    """True when self serves this set. Game label: 'Is Self Server For Set'."""
+    """True when self serves this set.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Self Server For Set'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_self_winning() -> bool:
-    """True when self leads the score. Game label: 'Is Self Winning'."""
+    """True when self leads the score.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Self Winning'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_serve_phase() -> bool:
-    """True while the ball is dead and the server prepares. Game label: 'Is Serve Phase'."""
+    """True while the ball is dead and the server prepares.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Serve Phase'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def is_tied() -> bool:
-    """True when the score is level. Game label: 'Is Tied'."""
+    """True when the score is level.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Is Tied'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def legal_serve_target() -> object:
-    """Center of the legal diagonal serve box. Game label: 'Legal Serve Target'."""
+def legal_serve_target() -> Vector3:
+    """Center of the legal diagonal serve box.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Legal Serve Target'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def must_wait_for_bounce() -> bool:
-    """True when the receiver must let the serve bounce first. Game label: 'Must Wait For Bounce'."""
+    """True when the receiver must let the serve bounce first.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Must Wait For Bounce'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def net_height() -> float:
-    """Net tape height. Game label: 'Net Height'."""
+    """Net tape height.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Net Height'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def opponent() -> object:
-    """Opponent position. Game label: 'Opponent'."""
+def opponent() -> Transform:
+    """Opponent position.
+
+    Returns: transform (game node TennisGetTransform).
+    Game label: 'Opponent'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_aces() -> float:
-    """Opponent ace count. Game label: 'Opponent Aces'."""
+    """Opponent ace count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Aces'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def opponent_average_scoring_location() -> object:
-    """Where their winners usually land. Game label: 'Opponent Average Scoring Location'."""
+def opponent_average_scoring_location() -> Vector3:
+    """Where their winners usually land.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Opponent Average Scoring Location'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_charged_shots() -> float:
-    """Opponent fully-charged shot count. Game label: 'Opponent Charged Shots'."""
+    """Opponent fully-charged shot count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Charged Shots'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_double_faults() -> float:
-    """Opponent double-fault count. Game label: 'Opponent Double Faults'."""
+    """Opponent double-fault count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Double Faults'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_faults() -> float:
-    """Opponent serve-fault count. Game label: 'Opponent Faults'."""
+    """Opponent serve-fault count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Faults'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_fouls() -> float:
-    """Opponent foul count. Game label: 'Opponent Fouls'."""
+    """Opponent foul count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Fouls'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_outs() -> float:
-    """Opponent out count. Game label: 'Opponent Outs'."""
+    """Opponent out count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Outs'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_points() -> float:
-    """Opponent points in the current game. Game label: 'Opponent Points'."""
+    """Opponent points in the current game.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Points'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_scored_last_point() -> bool:
-    """True when the opponent won the previous point. Game label: 'Opponent Scored Last Point'."""
+    """True when the opponent won the previous point.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Opponent Scored Last Point'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_set_score() -> float:
-    """Sets the opponent has won. Game label: 'Opponent Set Score'."""
+    """Sets the opponent has won.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Set Score'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_stamina_pct() -> float:
-    """Opponent stamina 0-1. Game label: 'Opponent Stamina Pct'."""
+    """Opponent stamina 0-1.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Stamina Pct'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def opponent_swing_charge_pct() -> float:
-    """Opponent swing charge 0-1. Game label: 'Opponent Swing Charge Pct'."""
+    """Opponent swing charge 0-1.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Opponent Swing Charge Pct'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def predicted_2nd_bounce() -> object:
-    """Where the ball will land second. Game label: 'Predicted 2nd Bounce'."""
+def predicted_2nd_bounce() -> Vector3:
+    """Where the ball will land second.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Predicted 2nd Bounce'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def predicted_bounce() -> object:
-    """Where the ball will land first. Game label: 'Predicted Bounce'."""
+def predicted_bounce() -> Vector3:
+    """Where the ball will land first.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Predicted Bounce'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def rally_fatigue() -> float:
-    """Fatigue factor growing with rally length. Game label: 'Rally Fatigue'."""
+    """Fatigue factor growing with rally length.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Rally Fatigue'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def random_aim_target() -> object:
-    """A game-picked aim point. Game label: 'Random Aim Target'."""
+def random_aim_target() -> Vector3:
+    """A game-picked aim point.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Random Aim Target'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def receive_stance() -> object:
-    """Where the receiver should wait. Game label: 'Receive Stance'."""
+def receive_stance() -> Vector3:
+    """Where the receiver should wait.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Receive Stance'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def self() -> object:
-    """Your position. Game label: 'Self'."""
+def self() -> Transform:
+    """Your position.
+
+    Returns: transform (game node TennisGetTransform).
+    Game label: 'Self'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_aces() -> float:
-    """Your ace count. Game label: 'Self Aces'."""
+    """Your ace count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Aces'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def self_average_scoring_location() -> object:
-    """Where your winners usually land. Game label: 'Self Average Scoring Location'."""
+def self_average_scoring_location() -> Vector3:
+    """Where your winners usually land.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Self Average Scoring Location'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_charged_shots() -> float:
-    """Your fully-charged shot count. Game label: 'Self Charged Shots'."""
+    """Your fully-charged shot count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Charged Shots'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_double_faults() -> float:
-    """Your double-fault count. Game label: 'Self Double Faults'."""
+    """Your double-fault count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Double Faults'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_faults() -> float:
-    """Your serve-fault count. Game label: 'Self Faults'."""
+    """Your serve-fault count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Faults'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_fouls() -> float:
-    """Your foul count. Game label: 'Self Fouls'."""
+    """Your foul count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Fouls'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_has_advantage() -> bool:
-    """True when you hold advantage at deuce. Game label: 'Self Has Advantage'."""
+    """True when you hold advantage at deuce.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Self Has Advantage'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_outs() -> float:
-    """Your out count. Game label: 'Self Outs'."""
+    """Your out count.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Outs'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_points() -> float:
-    """Your points in the current game. Game label: 'Self Points'."""
+    """Your points in the current game.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Points'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def self_racket_center() -> object:
-    """Your racket head position (strike point). Game label: 'Self Racket Center'."""
+def self_racket_center() -> Transform:
+    """Your racket head position (strike point).
+
+    Returns: transform (game node TennisGetTransform).
+    Game label: 'Self Racket Center'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_scored_last_point() -> bool:
-    """True when you won the previous point. Game label: 'Self Scored Last Point'."""
+    """True when you won the previous point.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Self Scored Last Point'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_set_score() -> float:
-    """Sets (matches) you have won. Game label: 'Self Set Score'."""
+    """Sets (matches) you have won.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Set Score'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_stamina_pct() -> float:
-    """Your stamina 0-1 (sprint drains it). Game label: 'Self Stamina Pct'."""
+    """Your stamina 0-1 (sprint drains it).
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Stamina Pct'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_swing_charge_pct() -> float:
-    """Your swing charge 0-1 (hold builds it). Game label: 'Self Swing Charge Pct'."""
+    """Your swing charge 0-1 (hold builds it).
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Swing Charge Pct'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def self_time_to_destination() -> float:
-    """Seconds for you to reach your move target. Game label: 'Self Time To Destination'."""
+    """Seconds for you to reach your move target.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Self Time To Destination'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def serve_number() -> float:
-    """1 for first serve, 2 for second serve. Game label: 'Serve Number'."""
+    """1 for first serve, 2 for second serve.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Serve Number'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def serve_stance() -> object:
-    """Where the server must stand (inside the serve area). Game label: 'Serve Stance'."""
+def serve_stance() -> Vector3:
+    """Where the server must stand (inside the serve area).
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Serve Stance'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_ball() -> float:
-    """Id of the shot currently in flight. Game label: 'Shot: Ball'."""
+    """Id of the shot currently in flight.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Ball'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_curve_left() -> float:
-    """Constant id of the curve-left shot. Game label: 'Shot: Curve Left'."""
+    """Constant id of the curve-left shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Curve Left'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_curve_right() -> float:
-    """Constant id of the curve-right shot. Game label: 'Shot: Curve Right'."""
+    """Constant id of the curve-right shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Curve Right'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_drop() -> float:
-    """Constant id of the drop shot. Game label: 'Shot: Drop'."""
+    """Constant id of the drop shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Drop'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_flat() -> float:
-    """Constant id of the flat shot. Game label: 'Shot: Flat'."""
+    """Constant id of the flat shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Flat'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_last_opponent_shot() -> float:
-    """Id of the opponent's most recent shot. Game label: 'Shot: Last Opponent Shot'."""
+    """Id of the opponent's most recent shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Last Opponent Shot'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_last_self_shot() -> float:
-    """Id of your most recent shot. Game label: 'Shot: Last Self Shot'."""
+    """Id of your most recent shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Last Self Shot'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_lob() -> float:
-    """Constant id of the lob shot. Game label: 'Shot: Lob'."""
+    """Constant id of the lob shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Lob'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_most_scored_opponent_shot() -> float:
-    """Id of the shot the opponent scored most with. Game label: 'Shot: Most Scored Opponent Shot'."""
+    """Id of the shot the opponent scored most with.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Most Scored Opponent Shot'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_most_scored_self_shot() -> float:
-    """Id of the shot you scored most with. Game label: 'Shot: Most Scored Self Shot'."""
+    """Id of the shot you scored most with.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Most Scored Self Shot'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_most_used_opponent_shot() -> float:
-    """Id of the opponent's most frequent shot. Game label: 'Shot: Most Used Opponent Shot'."""
+    """Id of the opponent's most frequent shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Most Used Opponent Shot'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_most_used_self_shot() -> float:
-    """Id of your most frequent shot. Game label: 'Shot: Most Used Self Shot'."""
+    """Id of your most frequent shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Most Used Self Shot'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_random() -> float:
-    """Constant id asking the game to pick a shot. Game label: 'Shot: Random'."""
+    """Constant id asking the game to pick a shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Random'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_slice() -> float:
-    """Constant id of the slice shot. Game label: 'Shot: Slice'."""
+    """Constant id of the slice shot.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Slice'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def shot_topspin() -> float:
-    """Constant id of the topspin shot (feed to move shot). Game label: 'Shot: Topspin'."""
+    """Constant id of the topspin shot (feed to move shot).
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Shot: Topspin'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def sim_tick() -> float:
-    """Current simulation tick. Game label: 'Sim Tick'."""
+    """Current simulation tick.
+
+    Returns: float (game node TennisGetFloat).
+    Game label: 'Sim Tick'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def trick_curve_left_modifier() -> object:
-    """Aim offset curving a trick shot left. Game label: 'Trick Curve Left Modifier'."""
+def trick_curve_left_modifier() -> Vector3:
+    """Aim offset curving a trick shot left.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Trick Curve Left Modifier'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def trick_curve_right_modifier() -> object:
-    """Aim offset curving a trick shot right. Game label: 'Trick Curve Right Modifier'."""
+def trick_curve_right_modifier() -> Vector3:
+    """Aim offset curving a trick shot right.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Trick Curve Right Modifier'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def trick_drop_modifier() -> object:
-    """Aim offset making a trick shot drop. Game label: 'Trick Drop Modifier'."""
+def trick_drop_modifier() -> Vector3:
+    """Aim offset making a trick shot drop.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Trick Drop Modifier'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def trick_lob_modifier() -> object:
-    """Aim offset making a trick shot lob. Game label: 'Trick Lob Modifier'."""
+def trick_lob_modifier() -> Vector3:
+    """Aim offset making a trick shot lob.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Trick Lob Modifier'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def was_last_shot_curve_left() -> bool:
-    """True when the last shot curved left. Game label: 'Was Last Shot Curve Left'."""
+    """True when the last shot curved left.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Was Last Shot Curve Left'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def was_last_shot_curve_right() -> bool:
-    """True when the last shot curved right. Game label: 'Was Last Shot Curve Right'."""
+    """True when the last shot curved right.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Was Last Shot Curve Right'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def was_last_shot_drop() -> bool:
-    """True when the last struck shot was a drop shot. Game label: 'Was Last Shot Drop'."""
+    """True when the last struck shot was a drop shot.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Was Last Shot Drop'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def was_last_shot_flat() -> bool:
-    """True when the last struck shot was flat. Game label: 'Was Last Shot Flat'."""
+    """True when the last struck shot was flat.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Was Last Shot Flat'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def was_last_shot_lob() -> bool:
-    """True when the last struck shot was a lob. Game label: 'Was Last Shot Lob'."""
+    """True when the last struck shot was a lob.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Was Last Shot Lob'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def was_last_shot_slice() -> bool:
-    """True when the last struck shot was slice. Game label: 'Was Last Shot Slice'."""
+    """True when the last struck shot was slice.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Was Last Shot Slice'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def was_last_shot_topspin() -> bool:
-    """True when the last struck shot was topspin. Game label: 'Was Last Shot Topspin'."""
+    """True when the last struck shot was topspin.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Was Last Shot Topspin'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
 def was_last_shot_trick() -> bool:
-    """True when the last shot was a trick shot. Game label: 'Was Last Shot Trick'."""
+    """True when the last shot was a trick shot.
+
+    Returns: bool (game node TennisGetBool).
+    Game label: 'Was Last Shot Trick'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 
-def move(x: float, z: float, swing: object = None, shot: object = None, sprint: object = None) -> None:
-    """Drive to court position (x, z) and strike: swing truthy charges/hits, shot is a Shot:* id, sprint truthy sprints. Exactly one controller call per tick."""
+def move(x: float, z: float, swing: bool | None = None, shot: float | None = None, sprint: bool | None = None) -> None:
+    """Drive to court position (x, z) and strike: the request runs through the game's TennisAutoAim + TennisAutoMove assist before the controller. Swing: hold (truthy) builds charge, RELEASE strikes — holding forever never hits, gate it on charge (if chg >= 0.7: swing = False else: swing = in_range). Shot is a Shot:* id, sprint truthy sprints. Exactly one controller call per tick.
+
+    Args: x (float court x), z (float court z), swing (bool|None charge/hit), shot (float|None Shot:* id), sprint (bool|None). Exactly one controller call per tick.
+    Connections are automatic; type mismatches fail loudly."""
     raise RuntimeError('author stub: compile with graphc')
 
-def move_vec(v: object, swing: object = None, shot: object = None, sprint: object = None) -> None:
-    """Same as move but driven by a vector (vec_make or a vector sensor)."""
+def move_vec(v: Vector3, swing: bool | None = None, shot: float | None = None, sprint: bool | None = None) -> None:
+    """Same as move but driven by a vector (vec_make or a vector sensor).
+
+    Args: v (vector from vec_make or a vector3 sensor).
+    Connections are automatic; transform input fails loudly."""
+    raise RuntimeError('author stub: compile with graphc')
+
+def aim(x: float, z: float) -> None:
+    """Strike-aim request for the next move call (autoswitch): the walk destination stays on the move wire — the game switches strike aim without touching how you walk. Pair with exactly one move per tick; aim without move fails loudly.
+
+    Args: x (float court x), z (float court z).
+    Connections are automatic; type mismatches fail loudly."""
+    raise RuntimeError('author stub: compile with graphc')
+
+def auto_swing(shot: float, mode: str | None = None) -> bool:
+    """Game swing node: hold builds charge, release strikes (mode: Normal Only | Prefer Charge | Random, default Prefer Charge). Returns the swing bool — wire it into move's swing.
+
+    Args: shot (float Shot:* id), mode (str|None swing mode).
+    Connections are automatic; type mismatches fail loudly."""
     raise RuntimeError('author stub: compile with graphc')
 

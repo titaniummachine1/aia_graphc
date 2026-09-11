@@ -24,6 +24,8 @@ if PYLIB not in sys.path:
 from AIGamePyLibrary.data import DROPDOWN_OPTIONS  # noqa: E402
 from descriptions import (  # noqa: E402
     SOCCER_MOVE_DOC,
+    TENNIS_AIM_DOC,
+    TENNIS_AUTO_SWING_DOC,
     TENNIS_MOVE_DOC,
     TENNIS_MOVE_VEC_DOC,
     describe,
@@ -81,6 +83,18 @@ def build(game: str, version: str, ver: str, kinds: dict) -> str:
     lines = [
         f'"""Author API for target ({game!r}, {version!r}) — GENERATED, do not edit.',
         "",
+        "Simple to use (humans + LLMs): import this module, call its",
+        "functions as plain values, and pass them to move()/move_vec().",
+        "You NEVER wire nodes, ports, or connections — the compiler assigns",
+        "every value a type (float/bool/vector/transform), checks every",
+        "connection, and emits the game save. Illegal wiring (bool into",
+        "arithmetic, vector into a float slot, transform into vec_split,",
+        "float where bool is needed) fails at compile time, loudly.",
+        "",
+        "Types: float = number, bool = true/false, vector = 3D point",
+        "(split with api.vec_split or feed move_vec), transform = placed",
+        "object (opaque: Self/Opponent/Ball — pick a vector3 sensor instead).",
+        "",
     ]
     if assumed:
         lines += [
@@ -96,6 +110,14 @@ def build(game: str, version: str, ver: str, kinds: dict) -> str:
         "",
         f"TARGET = ({game!r}, {version!r})",
         "",
+        "class Vector3:",
+        '    """Opaque 3D point: split via api.vec_split(v, 0/1/2) or feed',
+        "    t.move_vec(v). Never arithmetic directly.\"\"\"",
+        "",
+        "class Transform:",
+        '    """Opaque placed object (Self/Opponent/Ball): cannot split or',
+        '    do math on it; use a vector3 sensor instead."""',
+        "",
         "_SENSORS = {",
     ]
     for name in sorted(table):
@@ -108,30 +130,65 @@ def build(game: str, version: str, ver: str, kinds: dict) -> str:
     lines.append("")
     for name in sorted(table):
         kind, label = table[name]
-        ret = {"bool": "bool", "float": "float"}.get(kind, "object")
+        ret = {"bool": "bool", "float": "float", "vector3": "Vector3",
+               "transform": "Transform"}.get(kind, "float")
+        node = {"bool": "GetBool", "float": "GetFloat",
+                "vector3": "GetVector3", "transform": "GetTransform"}[kind]
         lines += [
             f"def {name}() -> {ret}:",
-            f'    """{describe(game, kind, label)} Game label: {label!r}."""',
+            f'    """{describe(game, kind, label)}',
+            "",
+            f"    Returns: {kind} (game node "
+            f"{'Tennis' if is_tennis else 'Soccer'}{node}).",
+            f"    Game label: {label!r}.",
+            '    Connections are automatic: use the return value directly; '
+            "    illegal uses fail at compile time.\"\"\"",
             "    raise RuntimeError('author stub: compile with graphc')",
             "",
         ]
     if is_tennis:
         lines += [
-            "def move(x: float, z: float, swing: object = None, "
-            "shot: object = None, sprint: object = None) -> None:",
-            f'    """{TENNIS_MOVE_DOC}"""',
+            "def move(x: float, z: float, swing: bool | None = None, "
+            "shot: float | None = None, sprint: bool | None = None) -> None:",
+            f'    """{TENNIS_MOVE_DOC}',
+            "",
+            "    Args: x (float court x), z (float court z), swing "
+            "(bool|None charge/hit), shot (float|None Shot:* id), sprint "
+            "(bool|None). Exactly one controller call per tick.",
+            '    Connections are automatic; type mismatches fail loudly."""',
             "    raise RuntimeError('author stub: compile with graphc')",
             "",
-            "def move_vec(v: object, swing: object = None, "
-            "shot: object = None, sprint: object = None) -> None:",
-            f'    """{TENNIS_MOVE_VEC_DOC}"""',
+            "def move_vec(v: Vector3, swing: bool | None = None, "
+            "shot: float | None = None, sprint: bool | None = None) -> None:",
+            f'    """{TENNIS_MOVE_VEC_DOC}',
+            "",
+            "    Args: v (vector from vec_make or a vector3 sensor).",
+            '    Connections are automatic; transform input fails loudly."""',
+            "    raise RuntimeError('author stub: compile with graphc')",
+            "",
+            "def aim(x: float, z: float) -> None:",
+            f'    """{TENNIS_AIM_DOC}',
+            "",
+            "    Args: x (float court x), z (float court z).",
+            '    Connections are automatic; type mismatches fail loudly."""',
+            "    raise RuntimeError('author stub: compile with graphc')",
+            "",
+            "def auto_swing(shot: float, "
+            "mode: str | None = None) -> bool:",
+            f'    """{TENNIS_AUTO_SWING_DOC}',
+            "",
+            "    Args: shot (float Shot:* id), mode (str|None swing mode).",
+            '    Connections are automatic; type mismatches fail loudly."""',
             "    raise RuntimeError('author stub: compile with graphc')",
             "",
         ]
     else:
         lines += [
             "def move(x: float, z: float) -> None:",
-            f'    """{SOCCER_MOVE_DOC}"""',
+            f'    """{SOCCER_MOVE_DOC}',
+            "",
+            "    Args: x (float), z (float). Exactly one call per tick.",
+            '    Connections are automatic; type mismatches fail loudly."""',
             "    raise RuntimeError('author stub: compile with graphc')",
             "",
         ]
