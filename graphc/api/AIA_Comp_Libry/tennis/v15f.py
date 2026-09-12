@@ -47,6 +47,7 @@ _SENSORS = {
     'camera_right': ('vector3', 'Camera Right'),
     'center_of_back': ('vector3', 'Center Of Back'),
     'center_of_half': ('vector3', 'Center Of Half'),
+    'center_of_legal_serve_area': ('vector3', 'Legal Serve Target'),
     'court_depth': ('float', 'Court Depth'),
     'court_width': ('float', 'Court Width'),
     'current_simulation_time': ('float', 'Current Simulation Time'),
@@ -141,7 +142,7 @@ _SENSORS = {
     'was_last_shot_trick': ('bool', 'Was Last Shot Trick'),
 }
 
-__all__ = ['ball', 'ball_has_bounced', 'ball_has_charged_effect', 'ball_in_swing_range', 'ball_incoming', 'ball_on_self_side', 'ball_position', 'ball_speed', 'ball_time_to_2nd_bounce', 'ball_time_to_ground', 'ball_velocity', 'camera', 'camera_forward', 'camera_right', 'center_of_back', 'center_of_half', 'court_depth', 'court_width', 'current_simulation_time', 'delta_time', 'deuce_fatigue', 'estimated_opponent_shot_location', 'fixed_delta_time', 'is_ad_court_serve', 'is_ball_playable', 'is_break_point', 'is_deuce', 'is_game_point', 'is_home', 'is_match_point', 'is_opponent_charging', 'is_opponent_server_for_set', 'is_opponent_winning', 'is_playing', 'is_second_serve', 'is_self_actively_serving', 'is_self_charging', 'is_self_server_for_set', 'is_self_winning', 'is_serve_phase', 'is_tied', 'legal_serve_target', 'must_wait_for_bounce', 'net_height', 'opponent', 'opponent_aces', 'opponent_average_scoring_location', 'opponent_charged_shots', 'opponent_double_faults', 'opponent_faults', 'opponent_fouls', 'opponent_outs', 'opponent_points', 'opponent_scored_last_point', 'opponent_set_score', 'opponent_stamina_pct', 'opponent_swing_charge_pct', 'predicted_2nd_bounce', 'predicted_bounce', 'rally_fatigue', 'random_aim_target', 'receive_stance', 'self', 'self_aces', 'self_average_scoring_location', 'self_charged_shots', 'self_double_faults', 'self_faults', 'self_fouls', 'self_has_advantage', 'self_outs', 'self_points', 'self_racket_center', 'self_scored_last_point', 'self_set_score', 'self_stamina_pct', 'self_swing_charge_pct', 'self_time_to_destination', 'serve_number', 'serve_stance', 'shot_ball', 'shot_curve_left', 'shot_curve_right', 'shot_drop', 'shot_flat', 'shot_last_opponent_shot', 'shot_last_self_shot', 'shot_lob', 'shot_most_scored_opponent_shot', 'shot_most_scored_self_shot', 'shot_most_used_opponent_shot', 'shot_most_used_self_shot', 'shot_random', 'shot_slice', 'shot_topspin', 'sim_tick', 'trick_curve_left_modifier', 'trick_curve_right_modifier', 'trick_drop_modifier', 'trick_lob_modifier', 'was_last_shot_curve_left', 'was_last_shot_curve_right', 'was_last_shot_drop', 'was_last_shot_flat', 'was_last_shot_lob', 'was_last_shot_slice', 'was_last_shot_topspin', 'was_last_shot_trick', 'move', 'move_vec']
+__all__ = ['ball', 'ball_has_bounced', 'ball_has_charged_effect', 'ball_in_swing_range', 'ball_incoming', 'ball_on_self_side', 'ball_position', 'ball_speed', 'ball_time_to_2nd_bounce', 'ball_time_to_ground', 'ball_velocity', 'camera', 'camera_forward', 'camera_right', 'center_of_back', 'center_of_half', 'center_of_legal_serve_area', 'court_depth', 'court_width', 'current_simulation_time', 'delta_time', 'deuce_fatigue', 'estimated_opponent_shot_location', 'fixed_delta_time', 'is_ad_court_serve', 'is_ball_playable', 'is_break_point', 'is_deuce', 'is_game_point', 'is_home', 'is_match_point', 'is_opponent_charging', 'is_opponent_server_for_set', 'is_opponent_winning', 'is_playing', 'is_second_serve', 'is_self_actively_serving', 'is_self_charging', 'is_self_server_for_set', 'is_self_winning', 'is_serve_phase', 'is_tied', 'legal_serve_target', 'must_wait_for_bounce', 'net_height', 'opponent', 'opponent_aces', 'opponent_average_scoring_location', 'opponent_charged_shots', 'opponent_double_faults', 'opponent_faults', 'opponent_fouls', 'opponent_outs', 'opponent_points', 'opponent_scored_last_point', 'opponent_set_score', 'opponent_stamina_pct', 'opponent_swing_charge_pct', 'predicted_2nd_bounce', 'predicted_bounce', 'rally_fatigue', 'random_aim_target', 'receive_stance', 'self', 'self_aces', 'self_average_scoring_location', 'self_charged_shots', 'self_double_faults', 'self_faults', 'self_fouls', 'self_has_advantage', 'self_outs', 'self_points', 'self_racket_center', 'self_scored_last_point', 'self_set_score', 'self_stamina_pct', 'self_swing_charge_pct', 'self_time_to_destination', 'serve_number', 'serve_stance', 'shot_ball', 'shot_curve_left', 'shot_curve_right', 'shot_drop', 'shot_flat', 'shot_last_opponent_shot', 'shot_last_self_shot', 'shot_lob', 'shot_most_scored_opponent_shot', 'shot_most_scored_self_shot', 'shot_most_used_opponent_shot', 'shot_most_used_self_shot', 'shot_random', 'shot_slice', 'shot_topspin', 'sim_tick', 'trick_curve_left_modifier', 'trick_curve_right_modifier', 'trick_drop_modifier', 'trick_lob_modifier', 'was_last_shot_curve_left', 'was_last_shot_curve_right', 'was_last_shot_drop', 'was_last_shot_flat', 'was_last_shot_lob', 'was_last_shot_slice', 'was_last_shot_topspin', 'was_last_shot_trick', 'move', 'move_vec']
 
 def ball() -> Transform:
     """Ball position.
@@ -268,6 +269,14 @@ def center_of_half() -> Vector3:
 
     Returns: vector3 (game node TennisGetVector3).
     Game label: 'Center Of Half'.
+    Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
+    raise RuntimeError('author stub: compile with graphc')
+
+def center_of_legal_serve_area() -> Vector3:
+    """Center of the legal diagonal serve box.
+
+    Returns: vector3 (game node TennisGetVector3).
+    Game label: 'Legal Serve Target'.
     Connections are automatic: use the return value directly;     illegal uses fail at compile time."""
     raise RuntimeError('author stub: compile with graphc')
 

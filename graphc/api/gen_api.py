@@ -59,6 +59,18 @@ LATEST = {"tennis": "v15f", "soccer": "v012"}
 
 ASSUMED = {("tennis", "v15f"): "v0.14"}
 
+#: Measured renames the fork table does not know yet: stub name ->
+#: (kind, fork label it resolves to). Same dropdown index (order
+#: preserved), so the game reads the identical sensor — the new name only
+#: matches upstream docs + real-bot saves (titanium54).
+#: "Center Of Legal Serve Area" == legacy "Legal Serve Target" (upstream
+#: README: both players read the same world point from it).
+EXTRA_ALIASES = {
+    ("tennis", "v15f"): {
+        "center_of_legal_serve_area": ("vector3", "Legal Serve Target"),
+    },
+}
+
 
 def mangle(label: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
@@ -77,6 +89,10 @@ def build(game: str, version: str, ver: str, kinds: dict) -> str:
             if name in table:
                 raise ValueError(f"mangle collision on {label!r} ({game})")
             table[name] = (kind, label)
+    for name, (kind, label) in EXTRA_ALIASES.get((game, version), {}).items():
+        if name in table:
+            raise ValueError(f"alias collision on {name!r} ({game} {version})")
+        table[name] = (kind, label)
     is_tennis = game == "tennis"
     mod = f"AIA_Comp_Libry.{game}.{ver}"
     assumed = ASSUMED.get((game, ver))

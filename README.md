@@ -76,31 +76,42 @@ subprocess.run(["graphc-rs", "mybot.desc.json", "mybot.txt"], check=True)
   No `api.var`/`api.set_var`, no annotation. State must start at 0 (game
   variables start at 0). A variable written but never read is optimized
   away.
+- Tables, the Python way: `aimz = [-4.0, -2.0, 2.0, 4.0]` then
+  `aimz[bucket]` — static reads inline to zero nodes, dynamic reads build
+  the backend's own select-chain. A module list the bot writes becomes RAM
+  (`hist[i] = v` with a static index at tick top level, reads static or
+  dynamic, `len(hist)`, `for i in range(len(hist))` fills). Same rule as
+  scalars: written => RAM, only read => frozen constants, all-zero init.
+  `api.array` still works underneath.
 - Anything the compiler cannot turn into nodes fails HERE with a pointing
   error — never a silently different bot. If your AI misbehaves in game,
   it is doing exactly what you coded.
 
 ## The guarantee (idiot-proofing)
 
-29-case misuse battery (`graphc/tests/test_misuse.py`, run it directly —
+33-case misuse battery (`graphc/tests/test_misuse.py`, run it directly —
 all loud, zero silent miscompiles): shadowed `api`, double controllers /
 double latch writes (same cell twice), stdlib/star/missing imports, wrong
-game or version, unknown sensors, tuple unpacking, `and`/`or`, ternaries,
-subscripts, walrus, chained comparisons, `break` outside loops,
-non-literal `range`, sinks inside loop bodies, missing returns, bad arity,
-undefined names, top-level statements, plus project rules (one `tick`,
-no conflicting constants). Bounded `for range(literal)` / `while` (64) /
-recursion (depth 32) are real and unroll inline — over-cap, sink-in-body,
-and depth-guard trips fail loudly with overflow canaries, never silently.
+game or version, unknown sensors, tuple unpacking, subscripts of
+non-tables, `and`/`or`, ternaries, walrus, chained comparisons, `break`
+outside loops, non-literal `range`, sinks inside loop bodies, missing
+returns, bad arity, undefined names, top-level statements, plus project
+rules (one `tick`, no conflicting constants). Bounded
+`for range(literal)` (16384) / `while` (512) / recursion (depth 128) are
+real and unroll inline — over-cap, sink-in-body, and depth-guard trips
+fail loudly with overflow canaries, never silently.
 Behaviour in game == behaviour coded.
 
 ## Optimization modes (`optimize=`)
 
-Performance is already maximal — the only graph cost is per-tick node
-transitions — so the mode only decides **how much unnecessary material the
+Performance is already maximal — the only graph cost is connection
+traversals per tick (node compute is free at this scale; the game fires
+every node and edge each tick, so the count is static AND expected) —
+so the mode only decides **how much unnecessary material the
 compiler may drop**. Behavior and play strength are invariant (verified in
 the sim by `tests/compiler_mode_parity.rs`: the same bot at every mode
-produces identical controller output, tick by tick).
+produces identical controller output, tick by tick). Graph size
+(nodes + connections) only breaks ties (smaller file, same play).
 
 | mode | frontend passes | emit |
 |------|-----------------|------|
@@ -187,9 +198,12 @@ mybot/
 ```
 Rules: one `tick(api)`, helpers return one float each, numeric constants
 at top level. Bounded loops are fine (`for i in range(19)`, `while` cap
-64, recursion depth 32 — all unroll to flat graphs with `!!` overflow
+512, recursion depth 128 — all unroll to flat graphs with `!!` overflow
 canaries); cross-tick state lives in latches (`api.var`/`set_var`), and
-sinks (`move`/`plot`/`set_var`) hoist out of loop bodies.
+sinks (`move`/`plot`/`set_var`) hoist out of loop bodies. Measured v15f
+ceiling: 12288-trip loop (37MB / 24.6k traversals) plays, 16384-trip (50MB
+/ 32.8k) dies on load — treat ~26k traversals / ~40MB size as the
+proven-danger line.
 
 ## Under the hood (only if you care)
 
@@ -199,10 +213,10 @@ sinks (`move`/`plot`/`set_var`) hoist out of loop bodies.
 - `graphc/desc.py`: language-neutral IR, (game, version) gates, and the
   `OPTIMIZE_MODES` resolver.
 - `graphc-rs` (Rust): IR -> game save JSON, port tables pinned from
-  AIGamePyLibrary, cost = **per-tick node transitions** (C# traversal
-  overhead, not FLOPs), layered grid-snapped editor layout so the graph
-  reads left-to-right like the code (o0/o1); o2 strips layout and chrome
-  for the smallest save.
+  AIGamePyLibrary, cost = **connection traversals per tick** (one per wired
+  edge; node compute is free at this scale — not FLOPs), layered
+  grid-snapped editor layout so the graph reads left-to-right like the code
+  (o0/o1); o2 strips layout and chrome for the smallest save.
 - `aia_comp-sim` (sibling repo): headless VM replays every compiled save
   in CI before it ever touches the game.
 
@@ -221,7 +235,7 @@ assumed v0.14-identical until measured.
   (float bit-identity), `test_modes.py` (optimization modes) — all
   runnable directly, no pytest needed.
 - Example rival bot: `examples/serve_latch_proj/` -> `graphc_rival.txt`
-  (19 nodes, 41 transitions, beats aia3 7-0 in sim).
+  (19 nodes, 22 traversals, beats aia3 7-0 in sim).
 - Example underdog: `examples/underdog/` (walk-to-incoming-bounce,
-  mirrored deep aim, AutoSwing — 26 ops, 25 nodes, 60 transitions).
+  mirrored deep aim, AutoSwing — 51 nodes, 62 traversals).
   In `Saves\Tennis\underdog.txt`, loadable in the node editor.

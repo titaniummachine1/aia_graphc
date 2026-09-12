@@ -1,5 +1,36 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 13 (2026-09-12: pure-Python tables)
+
+User rule (binding): pure Python over `api.*` wherever possible. Lists
+are tables now — no new API surface, the old `api.array` keeps working
+underneath:
+
+- `cells = [1.0, 2.0]` binds a frozen constant table (locals) or a module
+  constant (never written in tick). Static reads inline to ZERO nodes
+  (`cells[2]`, `tab[-1]`, `x = 5; tab[x]` via the SCCP static tag);
+  dynamic reads (`tab[dyn]`) build the backend's own select-chain
+  (`acc = cell0; select(idx==k, cell_k, acc)` — miss => cell0, verified
+  structurally in tests). `[0.0] * n` sugar included.
+- A module list the bot writes becomes RAM (packed-Vector3 array ops, the
+  stock backend — no backend change): `mem[i] = v` needs a static index
+  (literal, negative-wrapped, loop var, or pinned int) at tick top level;
+  dynamic/branch/helper/recursion writes fail loudly, same for double
+  cell writes. All-zero init enforced, same as scalar latches.
+- `len(tab)` works (statically tagged, so `for i in range(len(mem))`
+  fills a table — `_range_trips` accepts it). Tables never pass through
+  helpers/arithmetic whole, never straddle a branch, `for`-targets cannot
+  reuse table names, `tab.append` gets a pointing error (fixed-size HW).
+- Caught by inspection mid-build: `tab[-1]` first miscompiled (unary
+  minus bypassed the static path and the dynamic chain answered cell0) —
+  now normalized Python-style. SCCP pruning is load-bearing here (static
+  conditions legitimately hoist branch writes out of `_in_branch`).
+- Tests: `graphc/tests/test_tables.py` (7 patterns + 16 loud cases);
+  misuse battery's `subscript` case retired (now valid code — replaced by
+  subscript-of-scalar); example `examples/bots/table_aim.py` (54 nodes /
+  82 traversals, sim corpus parity green). Full suites green, old bots
+  rebuild bit-identical costs.
+
 ## Session 12 (2026-09-13: RLBot-style vector math)
 
 Ergonomics pass prompted by an RLBot comparison. RLBot bots lean on `Vec3`

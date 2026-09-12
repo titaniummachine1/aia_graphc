@@ -14,6 +14,7 @@ bots = {
     'pusher': os.path.join(ROOT, 'pusher.py'),
     'open_court': os.path.join(ROOT, 'open_court.py'),
     'alternator': os.path.join(ROOT, 'alternator.py'),
+    'table_aim': os.path.join(ROOT, 'table_aim.py'),
     'cross_court': os.path.join(ROOT, 'project', 'entry.py'),
 }
 

@@ -21,25 +21,29 @@ Rules (enforced at trace time — the supported-API whitelist):
      sensors, boolop/ternary/subscript/walrus, jumps outside loops,
      non-literal range, sinks in loop bodies, bad arity, top-level
      statements, conflicting constants — all loud.
-   - Dynamic `if` is real syntax (SSA phi-merge via select nodes);
-     bounded `for i in range(literal)` / `while` (cap 64) / recursion
-     (depth 32) unroll inline to flat graphs (overflow canaries, sinks
-     hoisted out); cross-tick state lives in api.var/api.set_var latches
-     and api.array cells (both arms evaluate per tick — semantics match
-     the game).
+    - Dynamic `if` is real syntax (SSA phi-merge via select nodes);
+      bounded `for i in range(literal)` (cap 16384) / `while` (cap 512) /
+      recursion (depth 128) unroll inline to flat graphs (overflow canaries,
+      sinks hoisted out); cross-tick state lives in api.var/api.set_var
+      latches and api.array cells (both arms evaluate per tick — semantics
+      match the game). Cost model: connection traversals per tick first, size ties.
    - Multi-file projects via compile_project (imports resolved, functions
      inlined); per-(game,version) API: import AIA_Comp_Libry.tennis.v014
      (or unversioned .tennis = latest). Version mismatch fails loudly.
    - Targets are explicit: compile for (game, version) from the pinned
      target tables (sensors/controllers differ per version). A "universal"
      target exists for unknown games: raw node emission only, no game API.
-   - Cross-tick memory: api.var/api.set_var (named latch, written once per
-     tick) and api.array + api.set_array_cell/get_array_cell/get_array_cell_dynamic (packed
-     Vector3 cells). One controller call per tick.
+    - Cross-tick memory: plain module variables (written => latch) and
+      plain-Python tables — `cells = [...]` binds constants, a module list
+      the bot writes becomes RAM (`tab[i] = v` static, reads static or
+      dynamic, `len(tab)`, `range(len(tab))` fills). Legacy api.var/set_var
+      and api.array cells still work. One controller call per tick.
    - Debug: api.plot(channel, value) (TimePlot sink, all targets) — the
      compiler-verification surface (game TimePlot export == sim == pure VM).
-Cost model: per-tick node transitions (nodes + edges) — the C# per-tick
-overhead metric. graphc-rs prints the report; CI fails on regressions.
+Cost model (lexicographic): connection traversals per tick first (one per
+wired edge — node compute is free at this scale; the game fires every node
+and edge each tick, so the count is static AND expected), graph size
+(nodes + connections) breaks ties. graphc-rs prints the report.
 Optimization modes (`compile_*`'s `optimize=` / graphc-rs's optional 3rd
 arg) only control how much unnecessary material is dropped: "raw" (no
 passes), "o0" (default, identity fold + DCE, keeps debug sinks), "o1"

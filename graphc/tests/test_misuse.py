@@ -57,7 +57,7 @@ CASES: list[tuple[str, str, tuple[str, str] | None]] = [
     ("boolop", "def tick(api):\n    x = 1\n    y = 2\n    z = x and y\n    api.move(z, 0)\n", None),
     ("ternary",
      "def tick(api):\n    x = 1\n    y = 1 if x > 0 else 2\n    api.move(y, 0)\n", None),
-    ("subscript", "def tick(api):\n    x = [1, 2]\n    api.move(x[0], 0)\n", None),
+    ("subscript of scalar", "def tick(api):\n    x = 1.0\n    api.move(x[0], 0)\n", None),
     ("walrus", "def tick(api):\n    x = (y := 5)\n    api.move(x, 0)\n", None),
     ("tuple unpack", "def tick(api):\n    a, b = 1, 2\n    api.move(a, b)\n", None),
     ("chained comparison",

@@ -4,8 +4,11 @@
 //!   description (language-neutral JSON) -> array expansion (pack 3 cells
 //!   per Vector3 var, merge same-vector static writes into one RMW) ->
 //!   node emission (version-pinned port tables) -> save JSON.
-//! Cost metric: per-tick node transitions (nodes + edges) — the C# overhead
-//! the game pays on every tick.
+//! Cost model (lexicographic): per-tick TRANSITIONS first — one per wired
+//! connection traversed per tick (node-internal compute is instant/free at
+//! this scale; the game evaluates every node and every edge each tick, so
+//! the count is static AND expected). SIZE (nodes + connections) only
+//! breaks ties (smaller file, same play).
 
 use serde::Deserialize;
 use std::collections::HashMap;

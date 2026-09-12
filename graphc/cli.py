@@ -139,8 +139,26 @@ def main(argv: "list[str] | None" = None) -> int:
 
     if not a.quiet:
         print(f"save  {os.path.abspath(out)}")
-        if proc.stdout.strip():
-            print(f"build {proc.stdout.strip()}")
+        report = (proc.stderr or proc.stdout).strip()
+        if report:
+            print(f"build {report}")
+        # Measured v15f ceiling 2026-09-12: 12288-trip loop (24589
+        # traversals / size 36889 / 37 MB) plays, 16384-trip (32781 /
+        # 49177 / 50 MB) dies on load. Loud but non-fatal: the compiler
+        # stays out of the way, the author owns the risk past this line.
+        trans = None
+        for line in ((proc.stderr or "") + "\n" + (proc.stdout or "")).splitlines()[::-1]:
+            try:
+                trans = json.loads(line).get("per_tick_transitions")
+                break
+            except Exception:
+                continue
+        if isinstance(trans, int) and trans > 26000:
+            print(f"graphc warning: {trans} connection traversals per tick "
+                  f"is past the proven-danger line (~26k traversals / "
+                  f"~40 MB size v15f) — expect load-crash territory; "
+                  f"verify in game before shipping",
+                  file=sys.stderr)
 
     if a.install:
         dest_dir = saves_dir(target[0])

@@ -69,7 +69,8 @@ fn main() {
             "optimize": mode_name(mode),
             "nodes": r.nodes,
             "connections": r.connections,
-            "per_tick_transitions": r.nodes + r.connections,
+            "per_tick_transitions": r.connections,
+            "size": r.nodes + r.connections,
         })
     };
     println!("{report}");

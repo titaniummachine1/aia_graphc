@@ -227,9 +227,12 @@ IR_OPS: dict[str, dict] = {
         "desc": "not b.",
     },
     "select": {
-        "args": [("c", "bool"), ("t", "float|bool"), ("f", "float|bool")],
-        "returns": "float|bool",
-        "desc": "if/else merge: both arms same type as result.",
+        "args": [("c", "bool"), ("t", "float|bool|vector"),
+                 ("f", "float|bool|vector")],
+        "returns": "float|bool|vector",
+        "desc": "if/else merge: both arms same type as result (float ->
+                 ConditionalSetFloatV2, bool -> ConditionalSetBool, vector
+                 -> ConditionalSetVector3).",
     },
     "array": {
         "args": [],

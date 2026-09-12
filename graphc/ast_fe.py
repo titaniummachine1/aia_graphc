@@ -20,6 +20,11 @@ Supported (v1):
     api.get_array_cell_dynamic(buf, idx)  dynamic cell read (select-chain)
     api.plot("channel", expr)     TimePlot debug sink (all targets;
                                   observable in game, sim, pure VM)
+    lst = [1.0, 2.0]              plain-Python tables (no api.*): a list
+    lst[0] = 3.0                  literal binds a frozen constant table;
+                                  module-level lists the bot writes become
+                                  RAM (static-index writes, static/dynamic
+                                  reads); len(lst) works, incl. range(len()).
     api.move(x, z)                soccer controller (target soccer)
     api.soccer_get_bool/float/vector3/transform(label)   sensors (soccer)
     api.position_of(t)            transform -> position vector
@@ -37,12 +42,12 @@ Supported (v1):
 
 Bounded control flow (unrolled/inlined at compile time — the game runs
 the flat graph, so per-tick cost stays static and reported):
-    for i in range(a[, b[, s]])   literal-int trips, unrolled. Pure
-                                  accumulation; break/continue allowed.
-    while cond:                   unrolled to MAX_WHILE_TRIPS (64) with an
+    for i in range(a[, b[, s]])   literal-int trips, unrolled (cap 16384).
+                                  Pure accumulation; break/continue allowed.
+    while cond:                   unrolled to MAX_WHILE_TRIPS (512) with an
                                   overflow canary plot (!!while_overflow).
     def f(...): ... f(...)        direct/indirect self-call inlines to
-                                  MAX_REC_DEPTH (32) with an overflow canary
+                                  MAX_REC_DEPTH (128) with an overflow canary
                                   (!!recursion_overflow). Single tail return;
                                   bodies must be sink-free (hoist set_var /
                                   plot / move out of loops and recursion).
@@ -133,19 +138,36 @@ LIBRY = "AIA_Comp_Libry"
 
 
 # --- bounded-loop / recursion caps (flat graph out: static per-tick cost)
-MAX_FOR_TRIPS = 4096
-MAX_WHILE_TRIPS = 64
-MAX_REC_DEPTH = 32
+# Cost model is lexicographic: connection traversals per tick first (one
+# per wired edge — node compute is free at this scale; the game fires
+# every node and edge each tick, so the count is static AND expected),
+# graph size (nodes + connections) breaks ties. Big unrolls are ALLOWED —
+# the author pays the traversals every tick and the backend reports them.
+# Caps below are only the loud guards before the game/sim itself refuses
+# the graph.
+MAX_FOR_TRIPS = 16384
+MAX_WHILE_TRIPS = 512
+# Recursion budget matches the sim's Function-nesting cap (lower.rs): both
+# raised together 64 -> 128, so the sim never silently Nulls what we emit.
+MAX_REC_DEPTH = 128
 # Total-op guard against degenerate unrolls (nested loops x recursion).
-MAX_UNROLL_OPS = 100_000
+MAX_UNROLL_OPS = 400_000
 # Lowering-chain guard: longest demand chain (desc ops) the sim's
 # recursive lowerer must walk. Measured 2026-09-11 (Windows 1MB main
 # thread): chains <= 641 lower fine, 1540 kills the process with
 # STATUS_STACK_OVERFLOW (uncaught — no loud error possible downstream).
-# 800 keeps margin both ways. Deep chains mean "use latches across ticks".
+# Sim runs lowering on a dedicated 8 MB stack with a loud guard at 1500
+# (lower.rs MAX_LOWER_DEPTH); 1400 keeps margin under it while allowing
+# ball-flight sims (~300 ticks) and deep tables in one tick. Deeper work
+# means "use latches across ticks".
+# Measured game ceiling 2026-09-12 (v15f, modded exe, add-1 loop ladder):
+# 12288 trips / 24589 traversals / size 36889 / 37 MB loads and scores;
+# 16384 trips / 32781 traversals / size 49177 / 50 MB dies on load
+# (process gone, no state — crash, never a freeze). Nothing in between
+# was probed; treat ~26k traversals / ~40 MB size as the proven-danger line.
 # (The principled sim-side fix is an explicit heap work-stack in the
 # lowerer instead of call-stack recursion; until then this is the net.)
-MAX_CHAIN_DEPTH = 800
+MAX_CHAIN_DEPTH = 1400
 
 
 def _norm_ver(v: str) -> str:
@@ -203,6 +225,17 @@ class _Ctx:
         # SetVariable — plain Python variables, no api.var/set_var.
         self._state_names: set[str] = set()
         self._state_dirty: set[str] = set()
+        # Plain-Python tables: name -> entry dict. const entries hold
+        # inlined element op ids (frozen); ram entries hold a hidden
+        # array handle lowered by the stock array backend (writes =>
+        # RAM, never written => constant — same rule as scalars).
+        # Entry: {"kind": "const"|"ram", "scope": "local"|"mod",
+        #         "cells": n, "elems": [...]|None, "arr": id|None,
+        #         "aname": str|None}.
+        self._tables: dict[str, dict] = {}
+        # Backend array names owned by RAM tables (collide-check against
+        # api.array declarations, which share the packed-Vector3 space).
+        self._table_arr_names: set[str] = set()
         # Split drive (tennis): tennis_aim records the strike-aim request
         # for the next tennis_move (autoswitch — walk wire untouched);
         # one aim per tick, and never without its controller.
@@ -277,6 +310,184 @@ class _Ctx:
         return op_id
 
 
+#: One table may not outgrow the trip budget (a bigger table is a bigger
+#: unroll — split it or compute values instead of storing them).
+MAX_TABLE_CELLS = 16384
+
+
+def _is_int_const(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, int) \
+        and not isinstance(node.value, bool)
+
+
+def _table_literal_elems(ctx: _Ctx, elts: list[ast.expr]) -> list[int]:
+    """Element expressions -> float op ids (flat, non-empty)."""
+    if not elts:
+        raise SyntaxError("empty tables are not compilable — name every cell")
+    ops = []
+    for e in elts:
+        if isinstance(e, (ast.List, ast.Tuple)):
+            raise SyntaxError(
+                "nested lists are not compilable — tables are flat "
+                "(one float per cell)")
+        v = _expr(ctx, e)
+        ctx._need(v, "float", "table element (one float per cell)")
+        ops.append(v)
+    if len(ops) > MAX_TABLE_CELLS:
+        raise SyntaxError(
+            f"table has {len(ops)} cells (cap {MAX_TABLE_CELLS}) — split "
+            "it or compute values instead of storing them")
+    return ops
+
+
+def _table_from_value(ctx: _Ctx, node: ast.expr) -> list[int] | None:
+    """List/tuple literal (or [e]*n sugar) -> element op ids, else None.
+
+    Pure shape check first (scalars never reach evaluation here).
+    """
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return _table_literal_elems(ctx, node.elts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        l, r = node.left, node.right
+        if isinstance(l, (ast.List, ast.Tuple)) and _is_int_const(r):
+            n = r.value
+            if n < 1:
+                raise SyntaxError(
+                    f"[e]*{n} is an empty table — repeat at least once")
+            return _table_literal_elems(ctx, l.elts) * n
+        if isinstance(r, (ast.List, ast.Tuple)) and _is_int_const(l):
+            n = l.value
+            if n < 1:
+                raise SyntaxError(
+                    f"{n}*[e] is an empty table — repeat at least once")
+            return _table_literal_elems(ctx, r.elts) * n
+    return None
+
+
+def _table_values(node: ast.expr) -> list[float] | None:
+    """Module-level table constant -> plain floats (else None)."""
+    if isinstance(node, (ast.List, ast.Tuple)):
+        vals = [_const_number(e) for e in node.elts]
+        if vals and all(v is not None for v in vals):
+            return [float(v) for v in vals]  # type: ignore[misc]
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        l, r = node.left, node.right
+        if isinstance(l, (ast.List, ast.Tuple)) and _is_int_const(r):
+            vals = [_const_number(e) for e in l.elts]
+            if vals and all(v is not None for v in vals) and r.value >= 1:
+                return [float(v) for v in vals] * r.value  # type: ignore[misc]
+        if isinstance(r, (ast.List, ast.Tuple)) and _is_int_const(l):
+            vals = [_const_number(e) for e in r.elts]
+            if vals and all(v is not None for v in vals) and l.value >= 1:
+                return [float(v) for v in vals] * l.value  # type: ignore[misc]
+    return None
+
+
+def _table_static_index(ctx: _Ctx, sl: ast.expr) -> int | None:
+    """Literal int (or a name pinned to one: loop var, `x = 5`) -> int."""
+    if _is_int_const(sl):
+        return sl.value  # type: ignore[return-value]
+    if isinstance(sl, ast.UnaryOp) and isinstance(sl.op, ast.USub) \
+            and _is_int_const(sl.operand):
+        return -sl.operand.value
+    if isinstance(sl, ast.Name) and sl.id in ctx._env:
+        sv = ctx._static.get(ctx._env[sl.id])
+        if isinstance(sv, int) and not isinstance(sv, bool):
+            return sv
+    return None
+
+
+def _table_norm_index(name: str, cells: int, idx: int) -> int:
+    if idx < 0:
+        idx += cells
+    if not 0 <= idx < cells:
+        raise SyntaxError(
+            f"table {name!r} has {cells} cells — index {idx} is out of "
+            "range (fails here, never wraps in game)")
+    return idx
+
+
+def _table_read_static(ctx: _Ctx, t: dict, idx: int) -> int:
+    if t["kind"] == "const":
+        return t["elems"][idx]
+    return ctx._set_type(ctx._emit(
+        {"op": "array_get_static", "arr": t["arr"], "i": idx}), "float")
+
+
+def _table_read_dyn(ctx: _Ctx, t: dict, ii: int) -> int:
+    """Dynamic float index -> value, mirroring the backend's own chain:
+    acc = cell0; for k: select(idx == k, cell_k, acc) (miss => cell0)."""
+    if t["kind"] == "ram":
+        return ctx._set_type(ctx._emit(
+            {"op": "array_get_dynamic", "arr": t["arr"], "i": ii}), "float")
+    acc = t["elems"][0]
+    for k in range(1, t["cells"]):
+        c = _fcmp(ctx, ii, ctx._desc(float(k)), "==")
+        acc = _fsel(ctx, c, t["elems"][k], acc)
+    return acc
+
+
+def _table_read(ctx: _Ctx, name: str, sl: ast.expr) -> int:
+    t = ctx._tables[name]
+    static = _table_static_index(ctx, sl)
+    if static is not None:
+        return _table_read_static(
+            ctx, t, _table_norm_index(name, t["cells"], static))
+    if isinstance(sl, ast.Constant):
+        raise SyntaxError(
+            f"table {name!r} index must be an int — got {sl.value!r} "
+            "(a float variable is a dynamic lookup, a literal is static)")
+    ii = _expr(ctx, sl)
+    ctx._need(ii, "float", f"table {name!r} index")
+    return _table_read_dyn(ctx, t, ii)
+
+
+def _table_write(ctx: _Ctx, name: str, sl: ast.expr, val: int) -> None:
+    """Cell store to a module RAM table (same order rules as latch writes)."""
+    t = ctx._tables[name]
+    if t["kind"] != "ram":
+        if t["scope"] == "local":
+            raise SyntaxError(
+                f"table {name!r} is a frozen constant — build a new list "
+                "instead of mutating cells (module tables the bot writes "
+                "become RAM)")
+        raise SyntaxError(
+            f"table {name!r} is read-only constants — write a cell in "
+            "tick() and it becomes RAM")
+    if ctx._in_branch:
+        raise SyntaxError(
+            f"table {name!r} cell write inside an if branch is ambiguous "
+            "in-game (it would run on one arm only) — hoist it out of "
+            "the branch")
+    if ctx._helper_depth or ctx._rec_depth:
+        raise SyntaxError(
+            f"table {name!r} cell write inside a helper/recursion has "
+            "ambiguous in-game order — write cells at tick top level")
+    static = _table_static_index(ctx, sl)
+    if static is None:
+        if ctx._loop_stack:
+            raise SyntaxError(
+                f"table {name!r} cell write with a dynamic index inside a "
+                "loop — the in-game write order would be ambiguous; use "
+                "the loop variable (static per trip) or hoist the write "
+                "out of the loop")
+        raise SyntaxError(
+            f"table {name!r} cell write needs a static index — got a "
+            "dynamic one (reads may be dynamic, writes address hardware "
+            "cells; write every cell explicitly)")
+    idx = _table_norm_index(name, t["cells"], static)
+    ctx._need(val, "float", f"table {name!r} cell value")
+    cell = (t["arr"], idx)
+    if cell in ctx._set_cells:
+        raise SyntaxError(
+            f"table {name!r} cell {idx} written twice in one tick — the "
+            "in-game write order would be ambiguous; merge into one write")
+    ctx._set_cells.add(cell)
+    ctx.ops.append({"op": "array_set_static", "arr": t["arr"],
+                    "i": idx, "v": val})
+
+
 def _expr(ctx: _Ctx, node: ast.expr) -> int:
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool):
@@ -307,6 +518,11 @@ def _expr(ctx: _Ctx, node: ast.expr) -> int:
                     {"op": "var_get", "name": node.id}), "float")
                 ctx._env[node.id] = op
                 return op
+            if node.id in ctx._tables:
+                raise SyntaxError(
+                    f"table {node.id!r} is not a value — index it "
+                    f"({node.id!r}[0], len({node.id!r})) or read a cell; "
+                    "tables never pass through helpers or arithmetic whole")
             raise SyntaxError(f"name {node.id!r} used before assignment")
         v = ctx._env[node.id]
         if v == _API_MARKER:
@@ -397,6 +613,16 @@ def _expr(ctx: _Ctx, node: ast.expr) -> int:
                 "<=": sa <= sb, ">=": sa >= sb}[cmp])
         return op_id
     if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name) and node.func.id == "len":
+            if len(node.args) == 1 and isinstance(node.args[0], ast.Name) \
+                    and node.args[0].id in ctx._tables:
+                t = ctx._tables[node.args[0].id]
+                op_id = ctx._desc(float(t["cells"]))
+                _tag_static(ctx, op_id, t["cells"])
+                return op_id
+            raise SyntaxError(
+                f"len() only measures tables — got "
+                f"{ast.unparse(node)[:60]!r}")
         try:
             return _api_call(ctx, node)
         except SyntaxError as e:
@@ -412,9 +638,22 @@ def _expr(ctx: _Ctx, node: ast.expr) -> int:
             f"x-if-c-else is not compilable — use if/else assignments: "
             f"{ast.unparse(node)[:60]!r}")
     if isinstance(node, ast.Subscript):
+        if isinstance(node.value, ast.Name) \
+                and node.value.id in ctx._tables:
+            return _table_read(ctx, node.value.id, node.slice)
+        if isinstance(node.value, ast.Name) \
+                and node.value.id in ctx._env:
+            raise SyntaxError(
+                f"{node.value.id!r} is a value, not a table — only plain "
+                f"lists are indexed ({node.value.id!r} holds one float)")
         raise SyntaxError(
-            f"subscripts are not compilable — arrays use api.get_array_cell: "
-            f"{ast.unparse(node)[:60]!r}")
+            f"subscripts index plain-Python tables — got "
+            f"{ast.unparse(node)[:60]!r} (bind a list first: "
+            f"cells = [0.0, 1.0], then cells[0])")
+    if isinstance(node, (ast.List, ast.Tuple)):
+        raise SyntaxError(
+            "a list is not a value — bind it (cells = [...]) and index "
+            "cells[i]; tables never flow through arithmetic whole")
     if isinstance(node, ast.NamedExpr):
         raise SyntaxError(
             f"walrus is not compilable — assign first: "
@@ -488,9 +727,10 @@ def _combine_pendings(ctx: _Ctx, qual, v: int) -> int:
             raise SyntaxError(
                 f"return paths{where} mix {ctx._typeof(pv)} and "
                 f"{ctx._typeof(v)} — helpers return one float")
+        _check_select_type(ctx._typeof(pv), "helper return paths")
         v = ctx._set_type(ctx._emit(
             {"op": "select", "c": c if pol else _bnot(ctx, c),
-             "t": pv, "f": v}), ctx._typeof(pv))
+              "t": pv, "f": v, "typ": ctx._typeof(pv)}), ctx._typeof(pv))
     ctx._fn_pend = []
     return v
 
@@ -511,6 +751,7 @@ def _inline_call(ctx: _Ctx, qual, node: ast.Call, rec_left: int) -> int:
         if len(defaults) < missing:
             raise SyntaxError(f"missing arguments for {qual!r}")
     saved_env = dict(ctx._env)
+    saved_tables = dict(ctx._tables)
     saved_left = ctx._rec_left
     saved_pend = ctx._fn_pend
     ctx._fn_pend = []
@@ -600,6 +841,7 @@ def _inline_call(ctx: _Ctx, qual, node: ast.Call, rec_left: int) -> int:
         ctx._fn_pend = saved_pend
         ctx._static_ret.pop()
         ctx._env = saved_env
+        ctx._tables = saved_tables
 
 
 def _targetmod_call(ctx: _Ctx, node: ast.Call, game: str, ver: str,
@@ -660,6 +902,12 @@ def _targetmod_call(ctx: _Ctx, node: ast.Call, game: str, ver: str,
 
 def _api_call(ctx: _Ctx, node: ast.Call) -> int:
     func = node.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
+            and func.value.id in ctx._tables:
+        raise SyntaxError(
+            f"table {func.value.id!r} has no methods — cells live at "
+            f"{func.value.id!r}[i] (read any index, write static ones); "
+            "there is no append/pop (tables are fixed-size hardware)")
     if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
         base = func.value.id
         alias = ctx._imports.get(base, base if base == "api" else None)
@@ -723,6 +971,10 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         _sink_guard(ctx, 'api.array')
         name, cells = args
         aname = ast.literal_eval(name)
+        if aname in ctx._table_arr_names:
+            raise SyntaxError(
+                f"api.array({aname!r}) collides with a plain-Python table "
+                "— rename one (they share the packed-Vector3 space)")
         if aname in ctx._arrays:
             raise SyntaxError(
                 f"api.array({aname!r}) twice in one tick — declare once, "
@@ -1076,9 +1328,24 @@ def _bnot(ctx: _Ctx, b: int) -> int:
     return ctx._set_type(ctx._emit({"op": "not", "b": b}), "bool")
 
 
+#: Value types a branch merge may pick between. The game has one
+#: conditional node per type (float/vector3/bool) — anything else
+#: (transforms, arrays) has no game node and fails loudly at the merge.
+_SELECT_TYPES = ("float", "bool", "vector")
+
+
+def _check_select_type(typ: str, where: str) -> str:
+    if typ not in _SELECT_TYPES:
+        raise SyntaxError(
+            f"{where} picks between {typ}s — the game has conditional "
+            "nodes for floats, bools and vectors only; split the value "
+            "into components first (e.g. vec_split)")
+    return typ
+
+
 def _fsel(ctx: _Ctx, c: int, t: int, f: int) -> int:
     return ctx._set_type(ctx._emit(
-        {"op": "select", "c": c, "t": t, "f": f}), "float")
+        {"op": "select", "c": c, "t": t, "f": f, "typ": "float"}), "float")
 
 
 def _b2f(ctx: _Ctx, c: int) -> int:
@@ -1130,17 +1397,18 @@ def _gate_assign(ctx: _Ctx, name: str, new: int) -> int:
             f"{name!r} is first assigned under a possibly-inactive path "
             "(break/continue/while-exit) — initialize it before the loop")
     t = ctx._typeof(new)
-    if t not in ("float", "bool"):
+    if t not in ("float", "bool", "vector"):
         raise SyntaxError(
-            f"only float/bool accumulators survive break/continue/while "
-            f"— {name!r} is {t} (compute it after the loop)")
+            f"only float/bool/vector accumulators survive "
+            f"break/continue/while — {name!r} is {t} (compute it after "
+            "the loop)")
     if ctx._typeof(prev) != t:
         raise SyntaxError(
             f"{name!r} changes type across loop paths ({ctx._typeof(prev)} "
             f"vs {t}) — keep one type")
     return ctx._set_type(ctx._emit(
         {"op": "select", "c": _f2b(ctx, _active_float(ctx)),
-         "t": new, "f": prev}), t)
+         "t": new, "f": prev, "typ": t}), t)
 
 
 def _sink_guard(ctx: _Ctx, what: str) -> None:
@@ -1273,8 +1541,12 @@ def _drive_loop(ctx: _Ctx, s, loopvar: str | None, trips: list,
         ctx.ops.append({"op": "plot", "name": canary, "v": over})
 
 
-def _range_trips(node: ast.Call) -> list:
-    """Literal range(...) args -> trip list (loud on anything dynamic)."""
+def _range_trips(ctx: _Ctx, node: ast.Call) -> list:
+    """Literal range(...) args -> trip list (loud on anything dynamic).
+
+    len(table) counts as literal (tables are fixed-size at compile time),
+    so `for i in range(len(mem))` fills a table naturally.
+    """
     if node.keywords:
         raise SyntaxError(
             f"range() takes no keywords — got {ast.unparse(node)[:60]!r}")
@@ -1283,7 +1555,12 @@ def _range_trips(node: ast.Call) -> list:
             f"range() needs 1-3 literal ints — got {ast.unparse(node)[:60]!r}")
     vals = []
     for a in node.args:
-        if isinstance(a, ast.UnaryOp) and isinstance(a.op, ast.USub) and \
+        if isinstance(a, ast.Call) and isinstance(a.func, ast.Name) \
+                and a.func.id == "len" and len(a.args) == 1 \
+                and isinstance(a.args[0], ast.Name) \
+                and a.args[0].id in ctx._tables:
+            vals.append(ctx._tables[a.args[0].id]["cells"])
+        elif isinstance(a, ast.UnaryOp) and isinstance(a.op, ast.USub) and \
                 isinstance(a.operand, ast.Constant) and \
                 isinstance(a.operand.value, int) and \
                 not isinstance(a.operand.value, bool):
@@ -1320,15 +1597,77 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
         # already persistent, so it is accepted and ignored.
         return
     if isinstance(s, ast.Assign):
-        if len(s.targets) != 1 or not isinstance(s.targets[0], ast.Name):
+        if len(s.targets) != 1:
             raise SyntaxError("only single-name assignments")
-        if s.targets[0].id == "api":
+        tgt = s.targets[0]
+        if isinstance(tgt, ast.Subscript):
+            # Table cell write: mem[i] = v (module RAM tables only).
+            if not isinstance(tgt.value, ast.Name):
+                raise SyntaxError(
+                    f"table write target must be a plain name — got "
+                    f"{ast.unparse(tgt)[:60]!r}")
+            if tgt.value.id not in ctx._tables:
+                raise SyntaxError(
+                    f"table {tgt.value.id!r} is not bound — bind a list "
+                    f"first ({tgt.value.id} = [0.0, ...])")
+            v = _expr(ctx, s.value)
+            _table_write(ctx, tgt.value.id, tgt.slice, v)
+            return
+        if not isinstance(tgt, ast.Name):
+            raise SyntaxError("only single-name assignments")
+        if tgt.id == "api":
             raise SyntaxError(
                 "cannot assign to 'api' — it is the game-API namespace")
-        _mark_state(ctx, s.targets[0].id)
-        ctx._env[s.targets[0].id] = _gate_assign(
-            ctx, s.targets[0].id, _expr(ctx, s.value))
+        if isinstance(s.value, (ast.List, ast.Tuple)) or (
+                isinstance(s.value, ast.BinOp)
+                and isinstance(s.value.op, ast.Mult)
+                and (isinstance(s.value.left, (ast.List, ast.Tuple))
+                     or isinstance(s.value.right, (ast.List, ast.Tuple)))):
+            # Plain-Python table bind: cells = [...] / cells = [0.0] * n.
+            if tgt.id in ctx._env:
+                raise SyntaxError(
+                    f"{tgt.id!r} already holds a value — pick a fresh "
+                    "name for the table (tables and values share no names)")
+            prev = ctx._tables.get(tgt.id)
+            if prev is not None and prev["scope"] == "mod":
+                raise SyntaxError(
+                    f"table {tgt.id!r} lives at module level — mutate "
+                    f"cells ({tgt.id}[i] = v) instead of rebinding it")
+            elems = _table_from_value(ctx, s.value)
+            assert elems is not None
+            ctx._tables[tgt.id] = {"kind": "const", "scope": "local",
+                                   "cells": len(elems), "elems": elems,
+                                   "arr": None, "aname": None}
+            return
+        if tgt.id in ctx._tables:
+            raise SyntaxError(
+                f"{tgt.id!r} is a table — index it ({tgt.id}[0]) or bind "
+                "cells; a table name never holds a plain value")
+        _mark_state(ctx, tgt.id)
+        ctx._env[tgt.id] = _gate_assign(
+            ctx, tgt.id, _expr(ctx, s.value))
     elif isinstance(s, ast.AugAssign):
+        if isinstance(s.target, ast.Subscript):
+            # mem[i] += v  ==  mem[i] = mem[i] + v (same write rules).
+            if not isinstance(s.target.value, ast.Name):
+                raise SyntaxError(
+                    f"table write target must be a plain name — got "
+                    f"{ast.unparse(s.target)[:60]!r}")
+            if s.target.value.id not in ctx._tables:
+                raise SyntaxError(
+                    f"table {s.target.value.id!r} is not bound — bind a "
+                    f"list first ({s.target.value.id} = [0.0, ...])")
+            name = s.target.value.id
+            cur = _table_read(ctx, name, s.target.slice)
+            fn = _BIN.get(type(s.op))
+            if fn is None:
+                raise SyntaxError(f"unsupported operator {type(s.op).__name__}")
+            rhs = _expr(ctx, s.value)
+            ctx._need(rhs, "float",
+                      f"augmented assign to {name!r} cell (right side)")
+            _table_write(ctx, name, s.target.slice, ctx._set_type(ctx._emit(
+                {"op": "bin", "fn": fn, "a": cur, "b": rhs}), "float"))
+            return
         if not isinstance(s.target, ast.Name):
             raise SyntaxError("augmented assign to non-name")
         name = s.target.id
@@ -1373,6 +1712,7 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
                     ctx._static_ret[-1] = v
             return
         env_saved = dict(ctx._env)
+        tabs_saved = {k: id(v) for k, v in ctx._tables.items()}
         ctx._in_branch = True
         ctx._cond_stack.append((cond, True))
         t_ret = None
@@ -1398,6 +1738,13 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
             env_false = dict(ctx._env)
             ctx._cond_stack.pop()
         ctx._in_branch = False
+        # Tables never straddle a branch (bind before the if; cells are
+        # written unconditionally at tick top level).
+        if {k: id(v) for k, v in ctx._tables.items()} != tabs_saved:
+            raise SyntaxError(
+                "tables bound inside an if branch are path-dependent — "
+                "bind the list before the branch (reads inside arms "
+                "are fine)")
         # SSA phi: every name differing between branches merges via select.
         # Arms must share a type — mixing float and bool across branches
         # would miswire the select node, so it fails here.
@@ -1415,8 +1762,10 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
                     raise SyntaxError(
                         f"if/else arms for {name!r} mix {tt} and {ff} — "
                         f"both branches must produce the same type")
+                _check_select_type(tt, f"if/else arms for {name!r}")
                 ctx._env[name] = ctx._set_type(ctx._emit(
-                    {"op": "select", "c": cond, "t": t, "f": f}), tt)
+                    {"op": "select", "c": cond, "t": t, "f": f,
+                     "typ": tt}), tt)
         # A conditional jump inside an arm updates flags and merges envs
         # here; tracing CONTINUES past the if with the rest gating on the
         # flags. (Unconditional jumps never reach here — they only occur
@@ -1433,9 +1782,10 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
                 raise SyntaxError(
                     f"return arms mix {tt} and {ff} — both must produce "
                     "the same type (helpers return one float)")
+            _check_select_type(tt, "helper return arms")
             raise _FnReturn(ctx._set_type(ctx._emit(
                 {"op": "select", "c": cond, "t": t_ret,
-                 "f": f_ret}), tt))
+                 "f": f_ret, "typ": tt}), tt))
         if t_ret is not None:
             ctx._fn_pend.append((cond, True, t_ret))
         elif f_ret is not None:
@@ -1445,6 +1795,10 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
             raise SyntaxError(
                 "for-target must be a single name — "
                 f"got {ast.unparse(s.target)[:40]!r}")
+        if s.target.id in ctx._tables:
+            raise SyntaxError(
+                f"for-target {s.target.id!r} is a table — loop variables "
+                "hold one float per trip; pick a fresh name")
         if not (isinstance(s.iter, ast.Call)
                 and isinstance(s.iter.func, ast.Name)
                 and s.iter.func.id == "range"):
@@ -1457,7 +1811,7 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
                 "for/else is not compilable yet — restructure with a "
                 "flag variable (the unrolled loop always completes, so "
                 "else would need exit-tracking)")
-        trips = _range_trips(s.iter)
+        trips = _range_trips(ctx, s.iter)
         if len(trips) > MAX_FOR_TRIPS:
             raise SyntaxError(
                 f"for-range has {len(trips)} trips (cap {MAX_FOR_TRIPS}) "
@@ -1712,37 +2066,58 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
                 pass  # docstring
             elif isinstance(s, ast.Assign) and len(s.targets) == 1 and \
                     isinstance(s.targets[0], ast.Name) and \
-                    _const_number(s.value) is not None:
-                pass  # numeric module constant (bound below)
+                    (_const_number(s.value) is not None
+                     or _table_values(s.value) is not None):
+                pass  # numeric module constant / table constant (bound below)
             else:
                 raise SyntaxError(
                     f"top-level {type(s).__name__} is not compilable — only "
-                    "functions, imports and numeric constants live at "
-                    "project top level")
+                    "functions, imports, numeric constants and list "
+                    "constants live at project top level")
     # Numeric module constants (tuning tables living at top level).
     # Same name + same value in two files is fine; same name with a
     # DIFFERENT value fails loudly (silent first-wins would mean something
     # other than what one of the files says).
     seen_consts: dict[str, float] = {}
+    seen_tables: dict[str, list[float]] = {}
     for mod in order:
         for s in modules[mod].body:
             if isinstance(s, ast.Assign) and len(s.targets) == 1 and \
                     isinstance(s.targets[0], ast.Name):
-                v = _const_number(s.value)
-                if v is None:
-                    continue
                 nm = s.targets[0].id
                 if nm == "api":
                     raise SyntaxError(
                         "cannot name a constant 'api' — it is the "
                         "game-API namespace")
-                if nm in seen_consts and seen_consts[nm] != v:
-                    raise SyntaxError(
-                        f"constant {nm!r} has conflicting values "
-                        f"({seen_consts[nm]} vs {v}) across project files")
-                seen_consts[nm] = v
-                if nm not in ctx._env:
-                    ctx._env[nm] = ctx._desc(v)
+                v = _const_number(s.value)
+                if v is not None:
+                    if nm in seen_tables:
+                        raise SyntaxError(
+                            f"{nm!r} is both a value and a table across "
+                            "project files — pick one shape per name")
+                    if nm in seen_consts and seen_consts[nm] != v:
+                        raise SyntaxError(
+                            f"constant {nm!r} has conflicting values "
+                            f"({seen_consts[nm]} vs {v}) across project files")
+                    seen_consts[nm] = v
+                    if nm not in ctx._env:
+                        ctx._env[nm] = ctx._desc(v)
+                    continue
+                tv = _table_values(s.value)
+                if tv is not None:
+                    if nm in seen_consts:
+                        raise SyntaxError(
+                            f"{nm!r} is both a value and a table across "
+                            "project files — pick one shape per name")
+                    if len(tv) > MAX_TABLE_CELLS:
+                        raise SyntaxError(
+                            f"table {nm!r} has {len(tv)} cells "
+                            f"(cap {MAX_TABLE_CELLS})")
+                    if nm in seen_tables and seen_tables[nm] != tv:
+                        raise SyntaxError(
+                            f"table {nm!r} has conflicting values "
+                            f"({seen_tables[nm]} vs {tv}) across files")
+                    seen_tables[nm] = tv
     bots = [(m, n) for (m, n) in ctx._functions if n == "tick"]
     if not bots:
         singles = {}
@@ -1778,6 +2153,42 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
                 f"it to {seen_consts[name]}")
         ctx._env.pop(name, None)
         ctx._state_names.add(name)
+    # Module tables, the same one rule as scalars: a module list the bot
+    # WRITES (any cell store, in tick or any helper) becomes RAM; one it
+    # only reads stays frozen constants. RAM must start all-zero (game
+    # variables start at 0). Writes inside helpers/loops/branches still
+    # fail at trace time with the ordering rule — this only decides RAM.
+    table_writes = set()
+    for (_m, _n), _fd in ctx._functions.items():
+        for sub in ast.walk(_fd):
+            if isinstance(sub, ast.Subscript) \
+                    and isinstance(sub.ctx, ast.Store) \
+                    and isinstance(sub.value, ast.Name) \
+                    and sub.value.id in seen_tables:
+                table_writes.add(sub.value.id)
+    for name in sorted(table_writes):
+        if any(v != 0 for v in seen_tables[name]):
+            raise SyntaxError(
+                f"table {name!r} must start all-zero (game variables "
+                "start at 0) — write the cells in tick instead of "
+                f"initializing them to {seen_tables[name]}")
+    for name in sorted(seen_tables):
+        vals = seen_tables[name]
+        if name in table_writes:
+            aname = f"table:{name}"
+            ctx._table_arr_names.add(aname)
+            op_id = len(ctx.ops)
+            ctx.ops.append({"op": "array", "name": aname,
+                            "cells": len(vals)})
+            ctx._types[op_id] = "array"
+            ctx._tables[name] = {"kind": "ram", "scope": "mod",
+                                 "cells": len(vals), "elems": None,
+                                 "arr": op_id, "aname": aname}
+        else:
+            ctx._tables[name] = {"kind": "const", "scope": "mod",
+                                 "cells": len(vals),
+                                 "elems": [ctx._desc(v) for v in vals],
+                                 "arr": None, "aname": None}
     saved = dict(ctx._env)
     state_writes: dict[str, int] = {}
     try:

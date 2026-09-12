@@ -11,7 +11,9 @@ Op set (SSA-ish; ids are line numbers):
   {"op":"bin","fn":AddFloats|SubtractFloats|MultiplyFloats|DivideFloats|
         Modulo|Power|CompareFloats,"a":id,"b":id,"cmp":str?}
   {"op":"not","b":id}
-  {"op":"select","c":id,"t":id,"f":id}
+  {"op":"select","c":id,"t":id,"f":id,"typ":float|bool|vector}
+    (typed branch merge -> ConditionalSetFloatV2 / ConditionalSetBool /
+    ConditionalSetVector3; arms outside these types fail at trace time)
   {"op":"array","name":str,"cells":n}            -> handle id
   {"op":"array_set_static","arr":id,"i":n,"v":id}
   {"op":"array_get_static","arr":id,"i":n}
@@ -48,7 +50,8 @@ Output description:
    "bot_name":str,"optimize":"raw|o0|o1|o2","ops":[...]}
 
 Optimization modes (resolve_optimize / optimize_ops): the graph has no
-performance headroom left — the only cost is per-tick node transitions — so
+performance headroom left — the only cost is connection traversals per
+tick (node compute is free at this scale) — so
 a mode only says how much unnecessary material to drop. "o0" (default) folds
 mathematical identities (`x*1`, `x/1`, `x-0`, `x**1`, `not(not)`,
 `select(c,t,t)`) and DCEs, keeping debug sinks; "o1" also drops debug sinks;
@@ -245,9 +248,12 @@ class GraphCtx:
         self.ops.append({"op": "var_set", "name": name, "v": self._desc(value)})
 
     # --- control flow -------------------------------------------------------
-    def select(self, cond, t, f) -> Sym:
+    def select(self, cond, t, f, typ: str = "float") -> Sym:
+        if typ not in ("float", "bool", "vector"):
+            raise TypeError(f"select typ must be float|bool|vector, got {typ!r}")
         return self._emit({"op": "select", "c": self._desc(cond),
-                           "t": self._desc(t), "f": self._desc(f)})
+                           "t": self._desc(t), "f": self._desc(f),
+                           "typ": typ})
 
     # --- game surface (version-pinned; validated against targets) -----------
     def soccer_move(self, x, z) -> None:
