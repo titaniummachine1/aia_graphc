@@ -79,6 +79,44 @@ NODE_DOCS: dict[str, dict] = {
         "(false). Both arms evaluate every tick; unwired false holds "
         "the previous tick. Also backs if/else SSA merges.",
     },
+    "ConditionalSetVector3": {
+        "inputs": [("Bool1", "bool"), ("Vector31", "vector"),
+                   ("Vector32", "vector")],
+        "output": "vector",
+        "desc": "Per-tick vector select: Bool1 picks Vector31 (true) or "
+        "Vector32 (false). Backs if/else merges over vectors.",
+    },
+    "ConditionalSetBool": {
+        "inputs": [("Bool1", "bool"), ("Bool2", "bool"), ("Bool3", "bool")],
+        "output": "bool",
+        "desc": "Per-tick bool select: Bool1 picks Bool2 (true) or Bool3 "
+        "(false). Backs if/else merges over bools.",
+    },
+    "Operation": {
+        "inputs": [("Float1", "float")],
+        "output": "float",
+        "desc": "Single-input math; modifier is the dropdown INDEX "
+        "(0 abs, 10 sqrt, 11 sign, ...). Authors call api.abs/sqrt/sign.",
+    },
+    "CompareBool": {
+        "inputs": [("Bool1", "bool"), ("Bool2", "bool")],
+        "output": "bool",
+        "desc": "Bool logic; modifier is the dropdown INDEX (0 and, "
+        "1 or, ...). Authors call api.bool_and/bool_or. Nesting ifs "
+        "compiles to the same selects.",
+    },
+    "ClampFloat": {
+        "inputs": [("Float1", "float"), ("Float2", "float"),
+                   ("Float3", "float")],
+        "output": "float",
+        "desc": "Clamp Float1 into [Float2, Float3]. Authors call "
+        "api.clamp(x, lo, hi).",
+    },
+    "DotProduct": {
+        "inputs": [("Vector31", "vector"), ("Vector32", "vector")],
+        "output": "float",
+        "desc": "Vector dot product. Authors call api.dot(a, b).",
+    },
     "GetVariable": {
         "inputs": [],
         "output": "float",
@@ -233,6 +271,28 @@ IR_OPS: dict[str, dict] = {
         "desc": "if/else merge: both arms same type as result (float ->
                  ConditionalSetFloatV2, bool -> ConditionalSetBool, vector
                  -> ConditionalSetVector3).",
+    },
+    "unary": {
+        "args": [("v", "float")],
+        "returns": "float",
+        "desc": "api.abs/sqrt/sign(v): one Operation node (modifier "
+                 "0/10/11).",
+    },
+    "bool_op": {
+        "args": [("a", "bool"), ("b", "bool")],
+        "returns": "bool",
+        "desc": "api.bool_and/bool_or(a, b): one CompareBool node "
+                 "(modifier 0/1).",
+    },
+    "clamp": {
+        "args": [("v", "float"), ("lo", "float"), ("hi", "float")],
+        "returns": "float",
+        "desc": "api.clamp(v, lo, hi): one ClampFloat node.",
+    },
+    "dot": {
+        "args": [("a", "vector"), ("b", "vector")],
+        "returns": "float",
+        "desc": "api.dot(a, b): one DotProduct node.",
     },
     "array": {
         "args": [],

@@ -1,5 +1,26 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 14 (2026-09-13: titanium gap helpers + typed selects)
+
+Exhaustive titanium54 cross-check (latest save): abs(59)/sqrt(45)/sign(3)
+= Operation 0/10/11, and(85)/or(39) = CompareBool 0/1, ClampFloat(170),
+DotProduct(14) — none had a one-node spelling. Closed with 7 `api.*`
+helpers (abs/sqrt/sign/bool_and/bool_or/clamp/dot): new desc ops
+(unary/bool_op/clamp/dot) + backend arms with the exact port tables +
+`_REF_KEYS` extended (lo/hi) so DCE/chain stay sound.
+
+Same session closed a REAL soundness hole the census exposed: vector and
+bool `if/else` arms compiled to float selects (game drops/garbles those
+wires — silent miscompile; titanium has 63 vector + 2 bool selects).
+Selects are typed now (float/bool/vector -> the matching ConditionalSet
+node, arm order pinned from the sim reference; transforms/arrays fail
+loudly). Old descs without `typ` still load (default float).
+
+Tests: `test_helpers.py` (4 + 6 loud), backend 24/24 (incl. legacy-desc
+compat), all suites green, sim 176/0 + corpus sound, old bots rebuild at
+identical op counts. Demo save census: Operation:0/10/11, CompareBool:0/1,
+ClampFloat, DotProduct, ConditionalSetVector3 all present.
+
 ## Session 13 (2026-09-12: pure-Python tables)
 
 User rule (binding): pure Python over `api.*` wherever possible. Lists

@@ -14,6 +14,10 @@ Op set (SSA-ish; ids are line numbers):
   {"op":"select","c":id,"t":id,"f":id,"typ":float|bool|vector}
     (typed branch merge -> ConditionalSetFloatV2 / ConditionalSetBool /
     ConditionalSetVector3; arms outside these types fail at trace time)
+  {"op":"unary","fn":Abs|Sqrt|Sign,"v":id}   -> Operation node (mod 0|10|11)
+  {"op":"bool_op","fn":and|or,"a":id,"b":id} -> CompareBool node (mod 0|1)
+  {"op":"clamp","v":id,"lo":id,"hi":id}      -> ClampFloat node
+  {"op":"dot","a":id,"b":id}                 -> DotProduct node
   {"op":"array","name":str,"cells":n}            -> handle id
   {"op":"array_set_static","arr":id,"i":n,"v":id}
   {"op":"array_get_static","arr":id,"i":n}
@@ -490,7 +494,7 @@ def resolve_optimize(mode) -> str:
 
 
 _REF_KEYS = ("a", "b", "c", "t", "f", "v", "x", "z", "s", "swing", "shot",
-             "sprint", "arr", "i")
+             "sprint", "arr", "i", "lo", "hi")
 # Per-op fields that LOOK like ints but are literals, never op refs.
 _LITERAL_KEYS = {
     "array_set_static": {"i"},

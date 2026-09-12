@@ -176,6 +176,10 @@ t.move_vec(lead, t.ball_in_swing_range(), 2.0)
 | `api.normalize(v)` | unit vector | Normalize |
 | `api.magnitude(v)` | `length(v)` | Magnitude |
 | `api.distance(a, b)` | `|a - b|` | Distance |
+| `api.dot(a, b)` | dot product | DotProduct |
+| `api.abs(x)` / `api.sqrt(x)` / `api.sign(x)` | |x| / √x / sign | Operation (0/10/11) |
+| `api.bool_and(a, b)` / `api.bool_or(a, b)` | boolean logic | CompareBool (0/1) |
+| `api.clamp(x, lo, hi)` | clamp into range | ClampFloat |
 
 Types are checked at compile time: a transform (`Self`/`Opponent`/`Ball`) or a
 float where a vector is expected fails loudly, never silently coerces.

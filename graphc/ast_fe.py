@@ -38,6 +38,10 @@ Supported (v1):
                                   -> bool (wire into move's swing)
     api.split_vector(v, i)        vector component -> float (i: 0=x,1=y,2=z)
     api.make_vector(x, y, z)      3 floats -> vector (feeds tennis_move_vec)
+    api.abs/sqrt/sign(x)          one Operation node each (0/10/11)
+    api.bool_and(a, b) / bool_or  one CompareBool node each (0/1)
+    api.clamp(x, lo, hi)          one ClampFloat node
+    api.dot(a, b)                 one DotProduct node
     api.var("name") / set_var     explicit latch (legacy; prefer module vars)
 
 Bounded control flow (unrolled/inlined at compile time — the game runs
@@ -1229,6 +1233,49 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         op = "vec_norm" if fn == "normalize" else "vec_len"
         typ = "vector" if fn == "normalize" else "float"
         return ctx._set_type(ctx._emit({"op": op, "v": vv}), typ)
+    if fn in ("abs", "sqrt", "sign"):
+        # One game node each (Operation 0/10/11 — the exact ops titanium
+        # uses 59/45/3 times). Pure: safe inside if branches.
+        if len(args) != 1:
+            raise SyntaxError(f"api.{fn}(x)")
+        xx = _expr(ctx, args[0])
+        ctx._need(xx, "float", f"api.{fn} x")
+        op = {"abs": "Abs", "sqrt": "Sqrt", "sign": "Sign"}[fn]
+        return ctx._set_type(ctx._emit({"op": "unary", "fn": op,
+                                        "v": xx}), "float")
+    if fn in ("bool_and", "bool_or"):
+        # One game node each (CompareBool 0/1 — titanium's 85/39).
+        if len(args) != 2:
+            raise SyntaxError(f"api.{fn}(a, b)")
+        aa, bb = _expr(ctx, args[0]), _expr(ctx, args[1])
+        ctx._need(aa, "bool", f"api.{fn} a")
+        ctx._need(bb, "bool", f"api.{fn} b")
+        op = "and" if fn == "bool_and" else "or"
+        return ctx._set_type(ctx._emit({"op": "bool_op", "fn": op,
+                                        "a": aa, "b": bb}), "bool")
+    if fn == "clamp":
+        # One game node (ClampFloat — titanium's 170). clamp(x, lo, hi).
+        if len(args) != 3:
+            raise SyntaxError("api.clamp(x, lo, hi)")
+        xx, lo, hi = (_expr(ctx, a) for a in args)
+        ctx._need(xx, "float", "api.clamp x")
+        ctx._need(lo, "float", "api.clamp lo")
+        ctx._need(hi, "float", "api.clamp hi")
+        return ctx._set_type(ctx._emit({"op": "clamp", "v": xx,
+                                        "lo": lo, "hi": hi}), "float")
+    if fn == "dot":
+        # One game node (DotProduct — titanium's 14).
+        if len(args) != 2:
+            raise SyntaxError("api.dot(a, b)")
+        aa, bb = _expr(ctx, args[0]), _expr(ctx, args[1])
+        for tag, vv in (("a", aa), ("b", bb)):
+            if ctx._typeof(vv) == "transform":
+                raise SyntaxError(
+                    f"api.dot needs vectors, got transform — use a vector3 "
+                    "sensor or api.make_vector(x, y, z)")
+            ctx._need(vv, "vector", f"api.dot {tag}")
+        return ctx._set_type(ctx._emit({"op": "dot", "a": aa,
+                                        "b": bb}), "float")
     raise SyntaxError(f"unknown api function {fn!r}")
 
 

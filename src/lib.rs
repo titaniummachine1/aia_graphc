@@ -42,7 +42,25 @@ pub enum Op {
     #[serde(rename = "not")]
     Not { b: usize },
     #[serde(rename = "select")]
-    Select { c: usize, t: usize, f: usize },
+    Select {
+        c: usize,
+        t: usize,
+        f: usize,
+        #[serde(default = "select_typ_float")]
+        typ: String,
+    },
+    #[serde(rename = "unary")]
+    Unary { r#fn: String, v: usize },
+    #[serde(rename = "bool_op")]
+    BoolOp {
+        r#fn: String,
+        a: usize,
+        b: usize,
+    },
+    #[serde(rename = "clamp")]
+    Clamp { v: usize, lo: usize, hi: usize },
+    #[serde(rename = "dot")]
+    Dot { a: usize, b: usize },
     #[serde(rename = "array")]
     Array { name: String, cells: usize },
     #[serde(rename = "array_set_static")]
@@ -191,6 +209,27 @@ const PORTS: &[(&str, &[(&str, i32)])] = &[
         "ConditionalSetFloatV2",
         &[("Float1", 0), ("Float2", 0), ("Float1", 1), ("Bool1", 0)],
     ),
+    (
+        "ConditionalSetVector3",
+        &[("Bool1", 0), ("Vector31", 0), ("Vector32", 0), ("Vector31", 1)],
+    ),
+    (
+        "ConditionalSetBool",
+        &[("Bool1", 0), ("Bool2", 0), ("Bool3", 0), ("Bool1", 1)],
+    ),
+    ("Operation", &[("Float1", 1), ("Float1", 0)]),
+    (
+        "CompareBool",
+        &[("Bool1", 1), ("Bool2", 0), ("Bool1", 0)],
+    ),
+    (
+        "ClampFloat",
+        &[("Float3", 0), ("Float1", 1), ("Float2", 0), ("Float1", 0)],
+    ),
+    (
+        "DotProduct",
+        &[("Vector31", 0), ("Vector32", 0), ("Float1", 1)],
+    ),
     ("GetVariable", &[("Any1", 1)]),
     ("SetVariable", &[("Any1", 0)]),
     ("SoccerGetBool", &[("Bool1", 1)]),
@@ -258,12 +297,17 @@ fn ports_table(kind: &str) -> Vec<(&'static str, i32)> {
 
 fn out_port(kind: &str) -> &'static str {
     match kind {
-        "CompareFloats" | "Not" | "TennisGetBool" | "SoccerGetBool" => "Bool1",
+        "CompareFloats" | "CompareBool" | "Not" | "ConditionalSetBool" | "TennisGetBool" | "SoccerGetBool" => "Bool1",
         "GetVariable" => "Any1",
-        "ConstructVector3" | "TennisGetVector3" | "SoccerGetVector3" | "RelativePosition" => "Vector31",
+        "ConstructVector3" | "ConditionalSetVector3" | "TennisGetVector3" | "SoccerGetVector3" | "RelativePosition" => "Vector31",
         "TennisGetTransform" | "SoccerGetTransform" => "Transform1",
         _ => "Float1",
     }
+}
+
+fn select_typ_float() -> String {
+    // Old descs predate typed selects (graphc-desc-v1 back-compat).
+    "float".to_string()
 }
 
 fn comp_out(comp: usize) -> &'static str {
@@ -457,11 +501,55 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 wire_val(&mut em, &vals, *b, n, "Bool1");
                 vals.push(Val::Node(n, "Bool1"));
             }
-            Op::Select { c, t, f } => {
-                let n = em.node("ConditionalSetFloatV2", String::new());
+            Op::Select { c, t, f, typ } => {
+                // Typed branch merge (frontend-checked): one conditional
+                // node per type — the exact nodes real bots use.
+                let (kind, tport, fport, out) = match typ.as_str() {
+                    "vector" => ("ConditionalSetVector3", "Vector31", "Vector32", "Vector31"),
+                    "bool" => ("ConditionalSetBool", "Bool2", "Bool3", "Bool1"),
+                    "float" => ("ConditionalSetFloatV2", "Float1", "Float2", "Float1"),
+                    other => return Err(format!("unknown select type {other:?}")),
+                };
+                let n = em.node(kind, String::new());
                 wire_val(&mut em, &vals, *c, n, "Bool1");
-                wire_val(&mut em, &vals, *t, n, "Float1");
-                wire_val(&mut em, &vals, *f, n, "Float2");
+                wire_val(&mut em, &vals, *t, n, tport);
+                wire_val(&mut em, &vals, *f, n, fport);
+                vals.push(Val::Node(n, out));
+            }
+            Op::Unary { r#fn, v } => {
+                // Single-input Operation ops (titanium's exact modifiers).
+                let modifier = match r#fn.as_str() {
+                    "Abs" => "0",
+                    "Sqrt" => "10",
+                    "Sign" => "11",
+                    other => return Err(format!("unknown unary {other:?}")),
+                };
+                let n = em.node("Operation", modifier.into());
+                wire_val(&mut em, &vals, *v, n, "Float1");
+                vals.push(Val::Node(n, "Float1"));
+            }
+            Op::BoolOp { r#fn, a, b } => {
+                let modifier = match r#fn.as_str() {
+                    "and" => "0",
+                    "or" => "1",
+                    other => return Err(format!("unknown bool_op {other:?}")),
+                };
+                let n = em.node("CompareBool", modifier.into());
+                wire_val(&mut em, &vals, *a, n, "Bool1");
+                wire_val(&mut em, &vals, *b, n, "Bool2");
+                vals.push(Val::Node(n, "Bool1"));
+            }
+            Op::Clamp { v, lo, hi } => {
+                let n = em.node("ClampFloat", String::new());
+                wire_val(&mut em, &vals, *v, n, "Float1");
+                wire_val(&mut em, &vals, *lo, n, "Float2");
+                wire_val(&mut em, &vals, *hi, n, "Float3");
+                vals.push(Val::Node(n, "Float1"));
+            }
+            Op::Dot { a, b } => {
+                let n = em.node("DotProduct", String::new());
+                wire_val(&mut em, &vals, *a, n, "Vector31");
+                wire_val(&mut em, &vals, *b, n, "Vector32");
                 vals.push(Val::Node(n, "Float1"));
             }
             Op::Array { name, cells } => {
@@ -1380,7 +1468,7 @@ mod tests {
             Op::Bin { r#fn: "CompareFloats".into(), a: 0, b: 15,      // 16
                       cmp: Some(">".into()) },
             const_op(2.0),                                            // 17
-            Op::Select { c: 16, t: 17, f: 1 },                        // 18
+            Op::Select { c: 16, t: 17, f: 1, typ: "float".into() }, // 18
             Op::Bin { r#fn: "AddFloats".into(), a: 14, b: 18, cmp: None }, // 19
             Op::SoccerMove { x: 19, z: 2 },                           // 20
         ]
@@ -1734,6 +1822,88 @@ mod tests {
         // A const float into a vector op is a loud error, not a silent 0-vec.
         let bad = vec![const_op(1.0), Op::VecNorm { v: 0 }];
         assert!(compile(&test_desc("tennis", "v0.14", bad)).is_err());
+    }
+
+    #[test]
+    fn scalar_helpers_and_typed_selects_emit_matching_nodes() {
+        // abs/sqrt/sign -> Operation 0/10/11; and/or -> CompareBool 0/1;
+        // clamp -> ClampFloat; dot -> DotProduct (titanium's exact nodes).
+        let ops = vec![
+            const_op(4.0),                                            // 0
+            const_op(0.0),                                            // 1
+            const_op(10.0),                                           // 2
+            Op::Unary { r#fn: "Abs".into(), v: 0 },                  // 3
+            Op::Unary { r#fn: "Sqrt".into(), v: 0 },                 // 4
+            Op::Unary { r#fn: "Sign".into(), v: 0 },                 // 5
+            Op::Clamp { v: 0, lo: 1, hi: 2 },                        // 6
+            Op::VecMake { x: 0, y: 1, z: 2 },                        // 7
+            Op::VecMake { x: 2, y: 1, z: 0 },                        // 8
+            Op::Dot { a: 7, b: 8 },                                  // 9
+            Op::Plot { name: "h.abs".into(), v: 3 },                // 10
+            Op::Plot { name: "h.dot".into(), v: 9 },                // 11
+        ];
+        let (save, _) = compile(&test_desc("tennis", "v0.14", ops))
+            .expect("scalar helpers compile");
+        let opmods: Vec<String> = kind_nodes(&save, "Operation")
+            .iter()
+            .map(|n| n["modifier"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(opmods, vec!["0", "10", "11"], "abs/sqrt/sign modifiers");
+        assert_eq!(kind_nodes(&save, "ClampFloat").len(), 1);
+        assert_eq!(kind_nodes(&save, "DotProduct").len(), 1);
+        for bad in vec![
+            vec![const_op(1.0), Op::Unary { r#fn: "Cube".into(), v: 0 }],
+            vec![const_op(1.0), Op::BoolOp { r#fn: "xor".into(), a: 0, b: 0 }],
+        ] {
+            assert!(compile(&test_desc("tennis", "v0.14", bad)).is_err(),
+                    "unknown helper fn must fail loudly");
+        }
+        // Typed selects: one conditional node per type (backend IGNORES
+        // nothing — vector/bool arms used to miswire into float ports).
+        let sel = |typ: &str| {
+            vec![
+                const_op(1.0),                                       // 0
+                const_op(2.0),                                       // 1
+                Op::Bin { r#fn: "CompareFloats".into(), a: 0, b: 1,
+                          cmp: Some(">".into()) },                   // 2
+                Op::Select { c: 2, t: 0, f: 1, typ: typ.into() },    // 3
+                Op::Plot { name: "s".into(), v: 3 },                // 4
+            ]
+        };
+        let (fsave, _) = compile(&test_desc("tennis", "v0.14", sel("float")))
+            .expect("float select compiles");
+        assert_eq!(kind_nodes(&fsave, "ConditionalSetFloatV2").len(), 1);
+        let (bsave, _) = compile(&test_desc("tennis", "v0.14", sel("bool")))
+            .expect("bool select compiles");
+        assert_eq!(kind_nodes(&bsave, "ConditionalSetBool").len(), 1);
+        assert!(compile(&test_desc("tennis", "v0.14", sel("frob"))).is_err(),
+                "unknown select type must fail loudly");
+        // Old descs predate "typ" (graphc-desc-v1 back-compat): missing
+        // typ deserializes as float.
+        let legacy: Description = serde_json::from_str(
+            r#"{"schema":"graphc-desc-v1","target":{"game":"tennis","version":"v0.14"},"bot_name":"tick","optimize":"o0","ops":[{"op":"const","value":1.0},{"op":"select","c":0,"t":0,"f":0}]}"#,
+        ).expect("legacy select desc parses");
+        let (lsave, _) = compile(&legacy).expect("legacy select compiles");
+        assert_eq!(kind_nodes(&lsave, "ConditionalSetFloatV2").len(), 1);
+    }
+
+    #[test]
+    fn vector_select_emits_conditional_vector3() {
+        let ops = vec![
+            const_op(1.0),                                           // 0
+            const_op(2.0),                                           // 1
+            const_op(3.0),                                           // 2
+            Op::VecMake { x: 0, y: 1, z: 2 },                       // 3
+            Op::VecMake { x: 2, y: 1, z: 0 },                       // 4
+            Op::Bin { r#fn: "CompareFloats".into(), a: 0, b: 1,
+                      cmp: Some(">".into()) },                       // 5
+            Op::Select { c: 5, t: 3, f: 4, typ: "vector".into() },   // 6
+            Op::Plot { name: "s".into(), v: 0 },                    // 7
+        ];
+        let (save, _) = compile(&test_desc("tennis", "v0.14", ops))
+            .expect("vector select compiles");
+        assert_eq!(kind_nodes(&save, "ConditionalSetVector3").len(), 1);
+        assert_eq!(kind_nodes(&save, "ConditionalSetFloatV2").len(), 0);
     }
 
     #[test]
