@@ -939,6 +939,44 @@ def _api_call(ctx: _Ctx, node: ast.Call) -> int:
         ctx._need(zz, "float", "api.vec_make z")
         return ctx._set_type(ctx._emit(
             {"op": "vec_make", "x": xx, "y": yy, "z": zz}), "vector")
+    if fn in ("vec_add", "vec_sub", "distance"):
+        if len(args) != 2:
+            raise SyntaxError(f"api.{fn}(a, b)")
+        aa, bb = _expr(ctx, args[0]), _expr(ctx, args[1])
+        for tag, vv in (("a", aa), ("b", bb)):
+            if ctx._typeof(vv) == "transform":
+                raise SyntaxError(
+                    f"api.{fn} needs vectors, got transform — use a vector3 "
+                    "sensor or api.make_vector(x, y, z)")
+            ctx._need(vv, "vector", f"api.{fn} {tag}")
+        op = {"vec_add": "vec_add", "vec_sub": "vec_sub",
+              "distance": "vec_dist"}[fn]
+        typ = "float" if fn == "distance" else "vector"
+        return ctx._set_type(ctx._emit({"op": op, "a": aa, "b": bb}), typ)
+    if fn == "vec_scale":
+        if len(args) != 2:
+            raise SyntaxError("api.vec_scale(v, s)")
+        vv, ss = _expr(ctx, args[0]), _expr(ctx, args[1])
+        if ctx._typeof(vv) == "transform":
+            raise SyntaxError(
+                "api.vec_scale needs a vector, got transform — use a vector3 "
+                "sensor or api.make_vector(x, y, z)")
+        ctx._need(vv, "vector", "api.vec_scale v")
+        ctx._need(ss, "float", "api.vec_scale s")
+        return ctx._set_type(ctx._emit(
+            {"op": "vec_scale", "v": vv, "s": ss}), "vector")
+    if fn in ("normalize", "magnitude"):
+        if len(args) != 1:
+            raise SyntaxError(f"api.{fn}(v)")
+        vv = _expr(ctx, args[0])
+        if ctx._typeof(vv) == "transform":
+            raise SyntaxError(
+                f"api.{fn} needs a vector, got transform — use a vector3 "
+                "sensor or api.make_vector(x, y, z)")
+        ctx._need(vv, "vector", f"api.{fn} v")
+        op = "vec_norm" if fn == "normalize" else "vec_len"
+        typ = "vector" if fn == "normalize" else "float"
+        return ctx._set_type(ctx._emit({"op": op, "v": vv}), typ)
     raise SyntaxError(f"unknown api function {fn!r}")
 
 

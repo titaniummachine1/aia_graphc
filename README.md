@@ -140,6 +140,41 @@ dropdown tables, so names can never drift: `t.ball_incoming()` reads
 *Ball Incoming*; a typo fails with the full option list. `py.typed`
 markers included — mypy/pylance work out of the box.
 
+### Vector math, RLBot-style
+
+The `api.*` surface has the vector building blocks RLBot bots lean on
+(`Vec3`, `.length()`, `.dist()`, normalize). Each one is a single game node:
+
+```python
+ball   = t.ball_position()
+bounce = t.predicted_bounce()
+
+toward = api.normalize(api.vec_sub(bounce, ball))   # unit dir ball -> bounce
+lead   = api.vec_add(ball, api.vec_scale(toward, 2.0))
+reach  = api.distance(ball, t.center_of_back())     # |ball - back centre|
+api.plot("reach", reach)
+t.move_vec(lead, t.ball_in_swing_range(), 2.0)
+```
+
+| helper | meaning | node |
+|---|---|---|
+| `api.make_vector(x, y, z)` | `Vec3(x, y, z)` | ConstructVector3 |
+| `api.split_vector(v, i)` | component `i` (0=x,1=y,2=z) | Vector3Split |
+| `api.vec_add(a, b)` / `api.vec_sub(a, b)` | `a + b` / `a - b` | AddVector3 / SubtractVector3 |
+| `api.vec_scale(v, s)` | `v * s` | ScaleVector3 |
+| `api.normalize(v)` | unit vector | Normalize |
+| `api.magnitude(v)` | `length(v)` | Magnitude |
+| `api.distance(a, b)` | `|a - b|` | Distance |
+
+Types are checked at compile time: a transform (`Self`/`Opponent`/`Ball`) or a
+float where a vector is expected fails loudly, never silently coerces.
+See `examples/bots/vec_geometry.py`.
+
+**What we deliberately do NOT copy from RLBot:** its runtime (packets, sockets,
+a long-lived process). graphc compiles to a static graph the game loads
+directly; `python -m graphc` is the whole pipeline, and the same save replays in
+the sim/VM for verification. The ergonomics are borrowed; the runtime is not.
+
 ## Organizing bigger bots
 
 Split across files freely — every function inlines at its call sites, so

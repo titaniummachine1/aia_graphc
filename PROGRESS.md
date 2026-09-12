@@ -1,5 +1,32 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 12 (2026-09-13: RLBot-style vector math)
+
+Ergonomics pass prompted by an RLBot comparison. RLBot bots lean on `Vec3`
+(`sub`, `.length()`, `.dist()`, normalize); the compiler had only `make_vector`
+/`split_vector`. Added the missing geometry as **plain `api.*` helpers**, each
+one a single game node (no VM/graph changes — the sim already implements all of
+them):
+
+    api.make_vector(x,y,z)  ConstructVector3      api.normalize(v)   Normalize
+    api.split_vector(v,i)   Vector3Split          api.magnitude(v)   Magnitude
+    api.vec_add(a,b)        AddVector3            api.distance(a,b)  Distance
+    api.vec_sub(a,b)        SubtractVector3       api.vec_scale(v,s) ScaleVector3
+
+- `graphc/desc.py`: six `Sym` methods + op docstrings (`s` added to `_REF_KEYS`).
+- `graphc/ast_fe.py`: the helpers in the `api.*` dispatch, with transform/float
+  misuse errors matching the existing split_vector/make_vector messages.
+- `src/lib.rs`: six `Op` variants, the game's exact port tables (from
+  AIGamePyLibrary `data.py`), emit arms, and a `vec_val` helper (const→vector is
+  a loud error).
+- Tests: `vec_geometry_ops_emit_the_matching_nodes` (backend 21→22); Python
+  misuse / const-join / modes suites green; `examples/bots/vec_geometry.py`
+  compiles end-to-end (15 nodes). Sim `compiler_corpus_parity` still sound.
+
+We deliberately do NOT copy RLBot's runtime (packets/sockets/long-lived
+process): graphc still compiles to a static graph the game loads directly, and
+the same save replays in the sim/VM. README "+ Vector math, RLBot-style".
+
 ## Session 11 (2026-09-12: one-command front door)
 
 Usability pass (user directive: "make the compiler easier/more natural to use").

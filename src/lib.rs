@@ -76,6 +76,18 @@ pub enum Op {
     VecSplit { v: usize, i: usize },
     #[serde(rename = "vec_make")]
     VecMake { x: usize, y: usize, z: usize },
+    #[serde(rename = "vec_add")]
+    VecAdd { a: usize, b: usize },
+    #[serde(rename = "vec_sub")]
+    VecSub { a: usize, b: usize },
+    #[serde(rename = "vec_scale")]
+    VecScale { v: usize, s: usize },
+    #[serde(rename = "vec_norm")]
+    VecNorm { v: usize },
+    #[serde(rename = "vec_len")]
+    VecLen { v: usize },
+    #[serde(rename = "vec_dist")]
+    VecDist { a: usize, b: usize },
     #[serde(rename = "tennis_move_vec")]
     TennisMoveVec {
         v: usize,
@@ -203,6 +215,12 @@ const PORTS: &[(&str, &[(&str, i32)])] = &[
         "Vector3Split",
         &[("Vector31", 0), ("Float1", 1), ("Float2", 1), ("Float3", 1)],
     ),
+    ("AddVector3", &[("Vector31", 0), ("Vector32", 0), ("Vector31", 1)]),
+    ("SubtractVector3", &[("Vector31", 0), ("Vector31", 1), ("Vector32", 0)]),
+    ("ScaleVector3", &[("Float1", 0), ("Vector31", 1), ("Vector31", 0)]),
+    ("Normalize", &[("Vector31", 0), ("Vector31", 1)]),
+    ("Magnitude", &[("Vector31", 0), ("Float1", 1)]),
+    ("Distance", &[("Vector32", 0), ("Float1", 1), ("Vector31", 0)]),
     ("SoccerController1", &[("Vector31", 0), ("Bool1", 0), ("Bool2", 0)]),
     ("TennisGetBool", &[("Bool1", 1)]),
     ("TennisGetFloat", &[("Float1", 1)]),
@@ -313,6 +331,18 @@ fn wire_val(em: &mut Emitter, vals: &[Val], id: usize, dst: usize, port: &'stati
             let n = em.const_node(c);
             em.edge(n, "Float1", dst, port);
         }
+    }
+}
+
+/// Resolve an op id to a `(node, output port)` vector source; a bare constant
+/// can never be a vector, so that (and an unknown id) is a loud error.
+fn vec_val(vals: &[Val], id: usize, what: &str) -> Result<(usize, &'static str), String> {
+    match vals.get(id) {
+        Some(Val::Node(n, p)) => Ok((*n, *p)),
+        Some(Val::Const(_)) => Err(format!(
+            "{what} of a constant float — source must be a vector"
+        )),
+        None => Err(format!("{what} of unknown op id {id}")),
     }
 }
 
@@ -605,6 +635,49 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 wire_val(&mut em, &vals, *y, vec, "Float2");
                 wire_val(&mut em, &vals, *z, vec, "Float3");
                 vals.push(Val::Node(vec, "Vector31"));
+            }
+            Op::VecAdd { a, b } => {
+                let (an, ap) = vec_val(&vals, *a, "vec_add")?;
+                let (bn, bp) = vec_val(&vals, *b, "vec_add")?;
+                let n = em.node("AddVector3", String::new());
+                em.edge(an, ap, n, "Vector31");
+                em.edge(bn, bp, n, "Vector32");
+                vals.push(Val::Node(n, "Vector31"));
+            }
+            Op::VecSub { a, b } => {
+                let (an, ap) = vec_val(&vals, *a, "vec_sub")?;
+                let (bn, bp) = vec_val(&vals, *b, "vec_sub")?;
+                let n = em.node("SubtractVector3", String::new());
+                em.edge(an, ap, n, "Vector31");
+                em.edge(bn, bp, n, "Vector32");
+                vals.push(Val::Node(n, "Vector31"));
+            }
+            Op::VecScale { v, s } => {
+                let (vn, vp) = vec_val(&vals, *v, "vec_scale")?;
+                let n = em.node("ScaleVector3", String::new());
+                em.edge(vn, vp, n, "Vector31");
+                wire_val(&mut em, &vals, *s, n, "Float1");
+                vals.push(Val::Node(n, "Vector31"));
+            }
+            Op::VecNorm { v } => {
+                let (vn, vp) = vec_val(&vals, *v, "vec_norm")?;
+                let n = em.node("Normalize", String::new());
+                em.edge(vn, vp, n, "Vector31");
+                vals.push(Val::Node(n, "Vector31"));
+            }
+            Op::VecLen { v } => {
+                let (vn, vp) = vec_val(&vals, *v, "vec_len")?;
+                let n = em.node("Magnitude", String::new());
+                em.edge(vn, vp, n, "Vector31");
+                vals.push(Val::Node(n, "Float1"));
+            }
+            Op::VecDist { a, b } => {
+                let (an, ap) = vec_val(&vals, *a, "vec_dist")?;
+                let (bn, bp) = vec_val(&vals, *b, "vec_dist")?;
+                let n = em.node("Distance", String::new());
+                em.edge(an, ap, n, "Vector31");
+                em.edge(bn, bp, n, "Vector32");
+                vals.push(Val::Node(n, "Float1"));
             }
             Op::TennisMoveVec { v, swing, shot, sprint } => {
                 require_game(game, "tennis", "tennis_move_vec")?;
@@ -1623,6 +1696,41 @@ mod tests {
                 assert!(!overlap, "nodes {i} and {j} overlap");
             }
         }
+    }
+
+    #[test]
+    fn vec_geometry_ops_emit_the_matching_nodes() {
+        // vec_sub -> SubtractVector3, normalize -> Normalize, magnitude ->
+        // Magnitude, vec_scale -> ScaleVector3, distance -> Distance.
+        let ops = vec![
+            const_op(1.0),                                           // 0
+            const_op(2.0),                                           // 1
+            const_op(3.0),                                           // 2
+            Op::VecMake { x: 0, y: 1, z: 2 },                       // 3
+            Op::VecMake { x: 2, y: 1, z: 0 },                       // 4
+            Op::VecSub { a: 3, b: 4 },                              // 5
+            Op::VecNorm { v: 5 },                                   // 6
+            Op::VecLen { v: 6 },                                    // 7
+            Op::VecScale { v: 6, s: 0 },                            // 8
+            Op::VecDist { a: 3, b: 4 },                             // 9
+            Op::Plot { name: "vec.len".into(), v: 7 },             // 10
+            Op::Plot { name: "vec.dist".into(), v: 9 },            // 11
+        ];
+        let (save, _) = compile(&test_desc("tennis", "v0.14", ops))
+            .expect("vec geometry ops compile");
+        assert_eq!(kind_nodes(&save, "ConstructVector3").len(), 2);
+        for kind in [
+            "SubtractVector3",
+            "Normalize",
+            "Magnitude",
+            "ScaleVector3",
+            "Distance",
+        ] {
+            assert_eq!(kind_nodes(&save, kind).len(), 1, "{kind}");
+        }
+        // A const float into a vector op is a loud error, not a silent 0-vec.
+        let bad = vec![const_op(1.0), Op::VecNorm { v: 0 }];
+        assert!(compile(&test_desc("tennis", "v0.14", bad)).is_err());
     }
 
     #[test]

@@ -30,6 +30,11 @@ Op set (SSA-ish; ids are line numbers):
    {"op":"vec_split","v":id,"i":0|1|2}            vector component -> float
     (x=0, y=1, z=2; e.g. latch "Legal Serve Target" components in vars)
    {"op":"vec_make","x":id,"y":id,"z":id}         3 floats -> vector handle
+   {"op":"vec_add","a":id,"b":id} / "vec_sub"     vector +/- vector
+   {"op":"vec_scale","v":id,"s":id}               vector * float
+   {"op":"vec_norm","v":id}                       vector -> unit vector
+   {"op":"vec_len","v":id}                        vector -> float (length)
+   {"op":"vec_dist","a":id,"b":id}                two vectors -> float distance
    {"op":"tennis_move_vec","v":id,"swing":id|null,
     "shot":id|null,"sprint":id|null}              (target tennis)
    {"op":"soccer_get","kind":bool|float|vector3|transform,
@@ -340,6 +345,34 @@ class GraphCtx:
         return self._emit({"op": "vec_make", "x": self._desc(x),
                            "y": self._desc(y), "z": self._desc(z)})
 
+    def vec_add(self, a, b) -> Sym:
+        """a + b (backend: AddVector3)."""
+        return self._emit({"op": "vec_add", "a": self._desc(a),
+                           "b": self._desc(b)})
+
+    def vec_sub(self, a, b) -> Sym:
+        """a - b: the direction from b to a (backend: SubtractVector3)."""
+        return self._emit({"op": "vec_sub", "a": self._desc(a),
+                           "b": self._desc(b)})
+
+    def vec_scale(self, v, s) -> Sym:
+        """v * s (backend: ScaleVector3)."""
+        return self._emit({"op": "vec_scale", "v": self._desc(v),
+                           "s": self._desc(s)})
+
+    def vec_norm(self, v) -> Sym:
+        """Unit vector in v's direction (backend: Normalize)."""
+        return self._emit({"op": "vec_norm", "v": self._desc(v)})
+
+    def vec_len(self, v) -> Sym:
+        """Length of v -> float (backend: Magnitude)."""
+        return self._emit({"op": "vec_len", "v": self._desc(v)})
+
+    def vec_dist(self, a, b) -> Sym:
+        """Distance between a and b -> float (backend: Distance)."""
+        return self._emit({"op": "vec_dist", "a": self._desc(a),
+                           "b": self._desc(b)})
+
     # --- debug sinks --------------------------------------------------------
     def plot(self, name: str, value) -> None:
         """TimePlot debug sink: {"op":"plot","name":str,"v":id}.
@@ -450,7 +483,7 @@ def resolve_optimize(mode) -> str:
     return key
 
 
-_REF_KEYS = ("a", "b", "c", "t", "f", "v", "x", "z", "swing", "shot",
+_REF_KEYS = ("a", "b", "c", "t", "f", "v", "x", "z", "s", "swing", "shot",
              "sprint", "arr", "i")
 # Per-op fields that LOOK like ints but are literals, never op refs.
 _LITERAL_KEYS = {
