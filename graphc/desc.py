@@ -40,7 +40,15 @@ Op set (SSA-ish; ids are line numbers):
     (all targets incl. universal — observable in game, sim, pure VM)
 Output description:
   {"schema":"graphc-desc-v1","target":{"game":..,"version":..},
-   "bot_name":str,"ops":[...]}
+   "bot_name":str,"optimize":"raw|o0|o1|o2","ops":[...]}
+
+Optimization modes (resolve_optimize / optimize_ops): the graph has no
+performance headroom left — the only cost is per-tick node transitions — so
+a mode only says how much unnecessary material to drop. "o0" (default) folds
+mathematical identities (`x*1`, `x/1`, `x-0`, `x**1`, `not(not)`,
+`select(c,t,t)`) and DCEs, keeping debug sinks; "o1" also drops debug sinks;
+"o2" also lets the backend strip visual chrome (nodes at 0,0) and remap ids;
+"raw" runs no passes. Behaviour is invariant.
 """
 from __future__ import annotations
 
@@ -395,7 +403,53 @@ def describe(target: tuple[str, str], builder) -> dict:
     return ctx.finish()
 
 
-# --- gcc-inspired peephole passes: cost = per-tick node transitions --------
+# --- gcc-inspired size passes: the only graph cost is per-tick transitions --
+#: Compiler optimization modes. They only control how much *unnecessary*
+#: material is dropped; node semantics and play strength are invariant.
+#:
+#:   ``"raw"`` no passes (frontend CSE only) — for frontend debugging.
+#:   ``"o0"``  default. Algebraic identity fold + dead-code elimination.
+#:            Keeps every debug sink, layout and editor chrome.
+#:   ``"o1"``  ``o0`` + drop debug sinks (api.plot / overflow canaries) and
+#:            re-run DCE, so values that only fed debug output disappear.
+#:            Layout and chrome still intact.
+#:   ``"o2"``  ``o1`` + strip ALL visual chrome at emit (nodes at 0,0, no
+#:            colors / port rects / connection chrome) and remap ids to
+#:            dense base62. Smallest file, identical logic.
+OPTIMIZE_MODES = ("raw", "o0", "o1", "o2")
+
+#: Familiar aliases (pylibry OptimizeFile naming + gcc spellings).
+_OPTIMIZE_ALIASES = {
+    "normal": "o0", "debug": "o0", "default": "o0",
+    "release": "o1", "core": "o2", "o3": "o2", "max": "o2",
+}
+
+
+def resolve_optimize(mode) -> str:
+    """Normalize an optimize mode to one of ``OPTIMIZE_MODES``.
+
+    Accepts ``"raw"/"o0"/"o1"/"o2"`` (case-insensitive), ints ``0/1/2``
+    (negative = raw), and the pylibry aliases normal/release/core. Anything
+    else fails loudly — a typo must never silently pick a wrong level.
+    """
+    if isinstance(mode, bool):
+        raise TypeError("optimize must be a str or int, got bool")
+    if isinstance(mode, int):
+        if mode < 0:
+            return "raw"
+        mode = f"o{mode}"
+    if not isinstance(mode, str):
+        raise TypeError(
+            f"optimize must be a str or int, got {type(mode).__name__}")
+    key = _OPTIMIZE_ALIASES.get(mode.strip().lower(), mode.strip().lower())
+    if key not in OPTIMIZE_MODES:
+        raise ValueError(
+            f"unknown optimize mode {mode!r} — pick one of "
+            f"{', '.join(OPTIMIZE_MODES)} (aliases: normal/debug -> o0, "
+            "release -> o1, core/max -> o2)")
+    return key
+
+
 _REF_KEYS = ("a", "b", "c", "t", "f", "v", "x", "z", "swing", "shot",
              "sprint", "arr", "i")
 # Per-op fields that LOOK like ints but are literals, never op refs.
@@ -407,6 +461,9 @@ _LITERAL_KEYS = {
 # Side-effect sinks: DCE roots. Everything else must feed a sink.
 _SINKS = {"var_set", "array_set_static", "soccer_move", "tennis_move",
           "tennis_move_vec", "tennis_aim", "plot"}
+#: Debug-only sinks, removed by o1+ (they have no output, so dropping the
+#: root lets DCE delete the values that existed only for the plot).
+_DEBUG_SINKS = {"plot"}
 
 
 def _refs(op: dict):
@@ -417,32 +474,83 @@ def _refs(op: dict):
             yield k, v
 
 
-def optimize_ops(ops: list[dict], level: int = 1) -> list[dict]:
-    """Semantics-preserving transition shavers (no arithmetic folding —
-    float rounding must stay bit-identical to per-tick game evaluation).
+def _const_of(ops: list[dict], i) -> float | None:
+    o = ops[i] if isinstance(i, int) and 0 <= i < len(ops) else None
+    if o is not None and o["op"] == "const":
+        return float(o["value"])
+    return None
 
-    - select-fold: select(c, t, t) -> t (both arms evaluate per tick, so a
-      same-value select is pure waste).
-    - DCE: drop ops unreachable from side-effect sinks (dead sensors,
-      orphaned consts, folded selects).
-    - cross-tick DCE: a latch written but never read is dead storage
-      (same code runs every tick, so "never read" is "never read ever") —
-      demote the var_set and let liveness drop its value chain.
+
+def _identity_target(ops: list[dict], i: int) -> int | None:
+    """Mathematical identity fold for op ``i`` -> the id it equals, else None.
+
+    Each rule is bit-identical to running the dropped node on the game's
+    floats/bools, so play strength cannot change:
+      x*1, 1*x, x/1, x**1, x-0   -> x   (exact for IEEE floats)
+      not(not(b))                -> b
+      select(c, t, t)            -> t   (both arms already evaluate per tick)
+    Deliberately NOT folded: x+0 flips -0.0 to +0.0, and x*0 is NaN-poisoned
+    (inf*0 = NaN) — neither is bit-safe to remove.
     """
-    if level < 1:
+    o = ops[i]
+    op = o["op"]
+    if op == "select":
+        return o["t"] if o["t"] == o["f"] else None
+    if op == "not":
+        b = ops[o["b"]] if isinstance(o["b"], int) and o["b"] < len(ops) else None
+        return b["b"] if b is not None and b["op"] == "not" else None
+    if op != "bin":
+        return None
+    fn = o["fn"]
+    if fn == "MultiplyFloats":
+        if _const_of(ops, o["a"]) == 1.0:
+            return o["b"]
+        if _const_of(ops, o["b"]) == 1.0:
+            return o["a"]
+    elif fn == "DivideFloats":
+        if _const_of(ops, o["b"]) == 1.0:
+            return o["a"]
+    elif fn == "SubtractFloats":
+        if _const_of(ops, o["b"]) == 0.0:
+            return o["a"]
+    elif fn == "Power":
+        if _const_of(ops, o["b"]) == 1.0:
+            return o["a"]
+    return None
+
+
+def optimize_ops(ops: list[dict], mode="o0") -> list[dict]:
+    """Drop unnecessary ops. ``mode`` selects how much (see OPTIMIZE_MODES).
+
+    Passes (all semantics-preserving):
+    - identity fold: see ``_identity_target`` (no float-rounding change).
+    - DCE: drop ops unreachable from side-effect sinks (dead sensors,
+      orphaned consts, folded nodes).
+    - cross-tick DCE: a latch written but never read is dead storage (same
+      code runs every tick, so "never read" is "never read ever") — demote
+      the var_set and let liveness drop its value chain.
+    - o1+: debug sinks are not roots, so every value that fed only a plot
+      disappears with it.
+    """
+    mode = resolve_optimize(mode)
+    if mode == "raw":
         return ops
+    strip_debug = mode in ("o1", "o2")
+    sinks = _SINKS - _DEBUG_SINKS if strip_debug else _SINKS
     ops = [dict(o) for o in ops]
-    changed = True
-    while changed:
+    while True:
         changed = False
         rep = {}
-        for i, o in enumerate(ops):
-            if o["op"] == "select" and o["t"] == o["f"]:
-                rep[i] = o["t"]
+        for i in range(len(ops)):
+            tgt = _identity_target(ops, i)
+            if tgt is not None and tgt != i:
+                rep[i] = tgt
                 changed = True
         if rep:
             def resolve(v):
-                while isinstance(v, int) and v in rep:
+                seen = set()
+                while isinstance(v, int) and v in rep and v not in seen:
+                    seen.add(v)
                     v = rep[v]
                 return v
 
@@ -450,7 +558,7 @@ def optimize_ops(ops: list[dict], level: int = 1) -> list[dict]:
                 for k, v in _refs(o):
                     o[k] = resolve(v)
         live: set[int] = set()
-        stack = [i for i, o in enumerate(ops) if o["op"] in _SINKS]
+        stack = [i for i, o in enumerate(ops) if o["op"] in sinks]
         while stack:
             i = stack.pop()
             if i in live:
@@ -466,12 +574,16 @@ def optimize_ops(ops: list[dict], level: int = 1) -> list[dict]:
             if o["op"] == "var_set" and o["name"] not in read_names:
                 o["op"] = "dead_write"  # demote: no longer a sink
                 changed = True
-    keep = sorted(live)
-    remap = {old: new for new, old in enumerate(keep)}
-    out = []
-    for old in keep:
-        o = dict(ops[old])
-        for k, v in _refs(o):
-            o[k] = remap[v]
-        out.append(o)
-    return out
+        # Rebuild to the live set every pass so a folded op cannot re-trigger
+        # the fold forever (it is now unreachable and gone).
+        keep = sorted(live)
+        remap = {old: new for new, old in enumerate(keep)}
+        prev = ops
+        ops = []
+        for old in keep:
+            o = dict(prev[old])
+            for k, v in _refs(o):
+                o[k] = remap[v]
+            ops.append(o)
+        if not changed:
+            return ops

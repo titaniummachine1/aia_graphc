@@ -10,6 +10,10 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+pub mod compact;
+
+pub use compact::{compact, CompactReport};
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct Target {
     pub game: String,
@@ -93,11 +97,60 @@ pub struct Description {
     pub target: Target,
     #[serde(default = "default_bot_name")]
     pub bot_name: String,
+    /// Size-optimization mode (frontend default "o0"). The Python frontend
+    /// already applied the desc-level passes; this only tells the emitter
+    /// how much visual chrome to drop ("o2"/core = none + dense ids).
+    #[serde(default = "default_optimize")]
+    pub optimize: String,
     pub ops: Vec<Op>,
 }
 
 fn default_bot_name() -> String {
     "graphc_bot".into()
+}
+
+fn default_optimize() -> String {
+    "o0".into()
+}
+
+/// Emit-side optimization level, parsed loudly from `Description::optimize`.
+/// Mirrors the frontend's `graphc.desc.OPTIMIZE_MODES`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    /// No passes: emit ops + full chrome (frontend-debug only).
+    Raw,
+    /// Default: full layout + editor chrome.
+    O0,
+    /// Debug sinks already stripped by the frontend; chrome still intact.
+    O1,
+    /// Core: strip ALL visual chrome (nodes at 0,0, no colors/rects/conn
+    /// chrome) and remap ids to dense base62 — smallest file, same logic.
+    O2,
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Mode::O0
+    }
+}
+
+impl Mode {
+    pub fn parse(s: &str) -> Result<Mode, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "raw" | "o-" => Ok(Mode::Raw),
+            "o0" | "0" | "normal" | "debug" | "default" => Ok(Mode::O0),
+            "o1" | "1" | "release" => Ok(Mode::O1),
+            "o2" | "2" | "core" | "max" => Ok(Mode::O2),
+            other => Err(format!(
+                "unknown optimize mode {other:?} — pick raw/o0/o1/o2 \
+                 (aliases normal/release/core)"
+            )),
+        }
+    }
+
+    pub(crate) fn core(self) -> bool {
+        matches!(self, Mode::O2)
+    }
 }
 
 /// SSA value after expansion.
@@ -326,6 +379,7 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
         return Err(format!("unknown schema {}", desc.schema));
     }
     check_target(&desc.target.game, &desc.target.version)?;
+    let mode = Mode::parse(&desc.optimize)?;
     let game = desc.target.game.as_str();
     let mut em = Emitter {
         nodes: Vec::new(),
@@ -648,7 +702,7 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
         nodes: em.nodes.len(),
         connections: em.conns.len(),
     };
-    Ok((emit_save(&em), report))
+    Ok((emit_save(&em, mode), report))
 }
 
 fn get_split(em: &mut Emitter, arr: &mut ArrayState, k: usize) -> usize {
@@ -913,7 +967,7 @@ fn node_color() -> serde_json::Value {
     serde_json::json!({"r": 0.21960784494876862, "g": 0.21960784494876862, "b": 0.21960784494876862, "a": 1.0})
 }
 
-fn emit_save(em: &Emitter) -> serde_json::Value {
+fn emit_save(em: &Emitter, mode: Mode) -> serde_json::Value {
     let mut counter = 0u64;
     let node_sids: Vec<String> = (0..em.nodes.len()).map(|_| uuid(&mut counter)).collect();
     // One sid per port INSTANCE (registry order). Duplicate port names within
@@ -985,10 +1039,139 @@ fn emit_save(em: &Emitter) -> serde_json::Value {
         }));
     }
 
-    serde_json::json!({
+    let mut save = serde_json::json!({
         "serializableNodes": nodes,
         "serializableConnections": conns,
-    })
+    });
+    if mode.core() {
+        core_strip(&mut save);
+        remap_short_ids(&mut save);
+    }
+    save
+}
+
+/// Dense base62 id (pylibry `_short_id`): 0 -> "0", 61 -> "z", 62 -> "10".
+fn short_id(mut index: usize) -> String {
+    const B62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    let base = B62.len();
+    let mut out = Vec::new();
+    loop {
+        out.push(B62[index % base]);
+        index /= base;
+        if index == 0 {
+            break;
+        }
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap()
+}
+
+/// Core (o2) chrome kill: drop every visual field the headless game/sim does
+/// not read for decisions. Nodes end up at 0,0 (rects removed), so Regions /
+/// layout / colors cost nothing in the file. Modifier/owner fields are kept
+/// only when non-empty (they are logic, not chrome).
+pub(crate) fn core_strip(save: &mut serde_json::Value) {
+    if let Some(nodes) = save["serializableNodes"].as_array_mut() {
+        for n in nodes.iter_mut() {
+            let Some(obj) = n.as_object_mut() else { continue };
+            obj.remove("serializableRectTransform");
+            obj.remove("serializeSizeDelta");
+            obj.remove("serializeColor");
+            obj.remove("serializableDefaultColor");
+            obj.remove("defaultColor");
+            if obj.get("ownerFunctionSID").and_then(|v| v.as_str()) == Some("") {
+                obj.remove("ownerFunctionSID");
+            }
+            if obj.get("modifier").and_then(|v| v.as_str()) == Some("") {
+                obj.remove("modifier");
+            }
+            if let Some(ports) = obj.get_mut("serializablePorts").and_then(|p| p.as_array_mut()) {
+                for p in ports.iter_mut() {
+                    let Some(po) = p.as_object_mut() else { continue };
+                    po.remove("serializableRectTransform");
+                    po.remove("controlPointSerializableRectTransform");
+                    po.remove("nodeSID");
+                }
+            }
+        }
+    }
+    if let Some(conns) = save["serializableConnections"].as_array_mut() {
+        for c in conns.iter_mut() {
+            let Some(co) = c.as_object_mut() else { continue };
+            co.remove("sID");
+            co.remove("port0InstanceID");
+            co.remove("port1InstanceID");
+        }
+    }
+}
+
+/// Rewrite every node/port/connection id to a short dense base62 id
+/// (pylibry `remapSids`). Topology and modifiers are untouched; only opaque
+/// identity strings shrink. First-seen order, so output is deterministic.
+pub(crate) fn remap_short_ids(save: &mut serde_json::Value) {
+    use std::collections::HashMap;
+    let mut order: Vec<String> = Vec::new();
+    let mut seen: HashMap<String, ()> = HashMap::new();
+    let note = |s: Option<&str>, order: &mut Vec<String>, seen: &mut HashMap<String, ()>| {
+        if let Some(s) = s {
+            if !s.is_empty() && !seen.contains_key(s) {
+                seen.insert(s.to_string(), ());
+                order.push(s.to_string());
+            }
+        }
+    };
+    if let Some(nodes) = save["serializableNodes"].as_array() {
+        for n in nodes {
+            note(n.get("sID").and_then(|v| v.as_str()), &mut order, &mut seen);
+            // Function bodies are referenced by ownerFunctionSID, not by an
+            // edge — it must be remapped with the node it points at.
+            note(n.get("ownerFunctionSID").and_then(|v| v.as_str()), &mut order, &mut seen);
+            if let Some(ports) = n.get("serializablePorts").and_then(|p| p.as_array()) {
+                for p in ports {
+                    note(p.get("sID").and_then(|v| v.as_str()), &mut order, &mut seen);
+                    note(p.get("nodeSID").and_then(|v| v.as_str()), &mut order, &mut seen);
+                }
+            }
+        }
+    }
+    if let Some(conns) = save["serializableConnections"].as_array() {
+        for c in conns {
+            note(c.get("sID").and_then(|v| v.as_str()), &mut order, &mut seen);
+            note(c.get("port0SID").and_then(|v| v.as_str()), &mut order, &mut seen);
+            note(c.get("port1SID").and_then(|v| v.as_str()), &mut order, &mut seen);
+        }
+    }
+    let map: HashMap<String, String> = order
+        .iter()
+        .enumerate()
+        .map(|(i, old)| (old.clone(), short_id(i)))
+        .collect();
+    let remap = |v: &mut serde_json::Value, key: &str, map: &HashMap<String, String>| {
+        if let Some(s) = v.get(key).and_then(|x| x.as_str()) {
+            if let Some(new) = map.get(s) {
+                v[key] = serde_json::json!(new);
+            }
+        }
+    };
+    if let Some(nodes) = save["serializableNodes"].as_array_mut() {
+        for n in nodes.iter_mut() {
+            remap(n, "sID", &map);
+            remap(n, "ownerFunctionSID", &map);
+            if let Some(ports) = n.get_mut("serializablePorts").and_then(|p| p.as_array_mut()) {
+                for p in ports.iter_mut() {
+                    remap(p, "sID", &map);
+                    remap(p, "nodeSID", &map);
+                }
+            }
+        }
+    }
+    if let Some(conns) = save["serializableConnections"].as_array_mut() {
+        for c in conns.iter_mut() {
+            remap(c, "sID", &map);
+            remap(c, "port0SID", &map);
+            remap(c, "port1SID", &map);
+        }
+    }
 }
 
 // ---------- golden-desc unit tests ----------
@@ -1013,6 +1196,7 @@ mod tests {
                 version: version.into(),
             },
             bot_name: "test".into(),
+            optimize: "o0".into(),
             ops,
         }
     }
@@ -1727,5 +1911,143 @@ mod tests {
             compile(&test_desc("soccer", "v0.12", bad_target)).is_err(),
             "auto_swing on soccer target must fail"
         );
+    }
+
+    #[test]
+    fn optimize_mode_parses_aliases_and_rejects_unknown() {
+        assert_eq!(Mode::parse("raw").unwrap(), Mode::Raw);
+        assert_eq!(Mode::parse("o0").unwrap(), Mode::O0);
+        assert_eq!(Mode::parse("normal").unwrap(), Mode::O0);
+        assert_eq!(Mode::parse("O1").unwrap(), Mode::O1);
+        assert_eq!(Mode::parse("release").unwrap(), Mode::O1);
+        assert_eq!(Mode::parse("o2").unwrap(), Mode::O2);
+        assert_eq!(Mode::parse("core").unwrap(), Mode::O2);
+        assert!(Mode::parse("o9").is_err(), "unknown mode must fail loudly");
+    }
+
+    #[test]
+    fn core_mode_shrinks_the_file_without_changing_logic() {
+        // Same logic (const + move), o0 vs o2: identical node set, but o2
+        // has no rects/colors/port chrome and dense short ids.
+        let mk = || {
+            vec![
+                const_op(3.0),                    // 0
+                const_op(4.0),                    // 1
+                Op::SoccerMove { x: 0, z: 1 },    // 2
+            ]
+        };
+        let mut o0 = test_desc("soccer", "v0.12", mk());
+        o0.optimize = "o0".into();
+        let mut o2 = test_desc("soccer", "v0.12", mk());
+        o2.optimize = "o2".into();
+
+        let (s0, r0) = compile(&o0).expect("o0 compiles");
+        let (s2, r2) = compile(&o2).expect("o2 compiles");
+        assert_eq!(r0.nodes, r2.nodes, "modes must not change the node count");
+
+        let nodes = s2["serializableNodes"].as_array().unwrap();
+        assert!(!nodes.is_empty());
+        let mut max_sid = 0usize;
+        for n in nodes {
+            let obj = n.as_object().unwrap();
+            assert!(obj.get("serializableRectTransform").is_none(), "no rects");
+            assert!(obj.get("defaultColor").is_none(), "no colors");
+            let sid = obj["sID"].as_str().unwrap();
+            assert!(sid.len() <= 2, "o2 ids are dense base62, got {sid:?}");
+            max_sid = max_sid.max(sid.len());
+            for p in obj["serializablePorts"].as_array().unwrap() {
+                let po = p.as_object().unwrap();
+                assert!(po.get("serializableRectTransform").is_none());
+                assert!(po.get("nodeSID").is_none(), "no port->node chrome");
+            }
+        }
+        let _ = max_sid;
+        for c in s2["serializableConnections"].as_array().unwrap() {
+            let co = c.as_object().unwrap();
+            assert!(co.get("sID").is_none(), "o2 drops connection chrome");
+            assert!(co.get("port0InstanceID").is_none());
+            assert!(co.contains_key("port0SID") && co.contains_key("port1SID"));
+        }
+        let len0 = serde_json::to_string(&s0).unwrap().len();
+        let len2 = serde_json::to_string(&s2).unwrap().len();
+        assert!(len2 < len0, "o2 ({len2}) must be smaller than o0 ({len0})");
+    }
+
+    #[test]
+    fn unknown_optimize_mode_fails_loudly() {
+        let mut desc = test_desc("soccer", "v0.12", vec![const_op(0.0)]);
+        desc.optimize = "o9".into();
+        assert!(compile(&desc).is_err());
+    }
+
+    /// Save where one Float feeds BOTH a TimePlot and the controller —
+    /// the exact case a naive "strip debug" would break.
+    fn shared_debug_producer_save() -> serde_json::Value {
+        let ops = vec![
+            const_op(5.0),                                   // 0
+            Op::Plot { name: "d".into(), v: 0 },             // 1
+            Op::SoccerMove { x: 0, z: 0 },                   // 2
+        ];
+        compile(&test_desc("soccer", "v0.12", ops))
+            .expect("compiles")
+            .0
+    }
+
+    #[test]
+    fn compact_keeps_a_producer_that_also_reaches_the_controller() {
+        let save = shared_debug_producer_save();
+        let (o2, _) = compact(&save, Mode::O2).expect("compact o2");
+        // Debug chain is gone...
+        assert!(kind_nodes(&o2, "TimePlot").is_empty(), "TimePlot must drop");
+        assert!(kind_nodes(&o2, "String").is_empty(), "String must drop");
+        // ...but the shared Float survives because the controller still needs it.
+        assert_eq!(
+            kind_nodes(&o2, "Float").len(),
+            1,
+            "shared producer must NOT be dropped"
+        );
+        assert_eq!(kind_nodes(&o2, "SoccerController1").len(), 1);
+        // The Float still wires into the move vector.
+        let f = &kind_nodes(&o2, "Float")[0];
+        let cvec = &kind_nodes(&o2, "ConstructVector3")[0];
+        assert!(
+            feeds(&o2, &port_sid(f, "Float1", true), &port_sid(cvec, "Float1", false)),
+            "shared Float must still feed ConstructVector3"
+        );
+    }
+
+    #[test]
+    fn compact_o0_keeps_debug_but_drops_true_dead_nodes() {
+        let save = shared_debug_producer_save();
+        let (o0, _) = compact(&save, Mode::O0).expect("compact o0");
+        assert_eq!(kind_nodes(&o0, "TimePlot").len(), 1, "o0 keeps debug");
+        assert_eq!(kind_nodes(&o0, "String").len(), 1);
+        // chrome survives in o0 (editor-readable)
+        assert!(o0["serializableNodes"][0]
+            .get("serializableRectTransform")
+            .is_some());
+    }
+
+    #[test]
+    fn compact_o2_strips_chrome_and_shortens_ids() {
+        let save = shared_debug_producer_save();
+        let (o2, r) = compact(&save, Mode::O2).expect("compact o2");
+        assert!(r.nodes_after < r.nodes_before);
+        for n in o2["serializableNodes"].as_array().unwrap() {
+            let obj = n.as_object().unwrap();
+            assert!(obj.get("serializableRectTransform").is_none());
+            assert!(obj.get("defaultColor").is_none());
+            assert!(obj["sID"].as_str().unwrap().len() <= 2);
+        }
+        let len0 = serde_json::to_string(&save).unwrap().len();
+        let len2 = serde_json::to_string(&o2).unwrap().len();
+        assert!(len2 < len0, "o2 ({len2}) must be smaller than input ({len0})");
+    }
+
+    #[test]
+    fn compact_rejects_non_saves_and_reports_mode_errors() {
+        let not_save = serde_json::json!({"schema": "graphc-desc-v1"});
+        assert!(compact(&not_save, Mode::O2).is_err());
+        assert!(Mode::parse("banana").is_err());
     }
 }

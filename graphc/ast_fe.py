@@ -1462,14 +1462,14 @@ def _block(ctx: _Ctx, stmts: list[ast.stmt]) -> None:
         _stmt(ctx, s)
 
 
-def compile_source(source: str, target: tuple[str, str], opt: int = 1) -> dict:
+def compile_source(source: str, target: tuple[str, str], optimize="o0") -> dict:
     """Parse plain Python source -> description dict (for graphc-rs).
 
     Helpers are allowed: the bot function is `tick` when defined, else the
     single top-level function (same rule as compile_project).
-    opt: 0 = raw ops, 1 = transition-shaving passes (DCE, select-fold).
+    optimize: "raw" | "o0" (default) | "o1" | "o2" — see graphc.desc.
     """
-    return _assemble({"": ast.parse(source)}, [""], target, opt, {""})
+    return _assemble({"": ast.parse(source)}, [""], target, optimize, {""})
 
 
 def _load_module(path: str) -> ast.Module:
@@ -1489,7 +1489,7 @@ def _resolve_file(base_dir: str, dotted: str) -> str:
     raise SyntaxError(f"import {dotted!r} is not a project file (whitelist)")
 
 
-def compile_project(entry: str, target: tuple[str, str], opt: int = 1) -> dict:
+def compile_project(entry: str, target: tuple[str, str], optimize="o0") -> dict:
     """Compile a whole project: entry .py + its local imports.
 
     Every project function is inlined at its call sites, so the output is
@@ -1497,7 +1497,7 @@ def compile_project(entry: str, target: tuple[str, str], opt: int = 1) -> dict:
     The bot function is `tick` when defined, else the single top-level
     function. `import api` / `from api import x` address the builtin
     game-API namespace; every other import must resolve to a project file.
-    opt: 0 = raw ops, 1 = transition-shaving passes (DCE, select-fold).
+    optimize: "raw" | "o0" (default) | "o1" | "o2" — see graphc.desc.
     """
     entry = os.path.abspath(entry)
     base_dir = os.path.dirname(entry)
@@ -1538,7 +1538,7 @@ def compile_project(entry: str, target: tuple[str, str], opt: int = 1) -> dict:
                     seen_files.add(fp)
                     modules[s.module or ""] = _load_module(fp)
                     order.append(s.module or "")
-    return _assemble(modules, order, target, opt, real_mods)
+    return _assemble(modules, order, target, optimize, real_mods)
 
 
 def _const_number(node: ast.expr) -> float | None:
@@ -1552,7 +1552,7 @@ def _const_number(node: ast.expr) -> float | None:
 
 
 def _assemble(modules: dict[str, ast.Module], order: list[str],
-              target: tuple[str, str], opt: int = 1,
+              target: tuple[str, str], optimize="o0",
               real_mods: set[str] | None = None) -> dict:
     real_mods = real_mods if real_mods is not None else set(order)
     ctx = _Ctx(target)
@@ -1776,10 +1776,12 @@ def _assemble(modules: dict[str, ast.Module], order: list[str],
         ctx.ops.append({"op": "plot", "name": "!!recursion_overflow:" + qname,
                         "v": total})
     _check_chain_depth(ctx)
-    from .desc import optimize_ops
+    from .desc import optimize_ops, resolve_optimize
+    mode = resolve_optimize(optimize)
     return {
         "schema": "graphc-desc-v1",
         "target": {"game": target[0], "version": target[1]},
         "bot_name": bname,
-        "ops": optimize_ops(ctx.ops, opt),
+        "optimize": mode,
+        "ops": optimize_ops(ctx.ops, mode),
     }

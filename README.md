@@ -19,7 +19,21 @@ def tick(api):
     t.move(mx, mz, t.ball_in_swing_range(), 2.0)
 ```
 
-Compile it:
+Compile it (one command — compiles to IR, runs the Rust backend, and drops the
+save straight into the game's `Saves\Tennis\`):
+```
+python -m graphc mybot/entry.py -o mybot.txt --install
+```
+That is the whole pipeline. `graphc-rs` is auto-discovered next to this checkout
+(`target/release/`, override with `--backend` or `GRAPHC_BACKEND`). Load `mybot`
+in the node editor. Done — it serves, rallies, and swings.
+
+Useful flags: `--target tennis:v0.14` (or `soccer:v0.12`) to compile for a
+specific game/version, `-O o1`/`-O o2` to drop debug sinks / strip the editor
+chrome (smaller save), `--desc out.desc.json` to inspect or hand-tune the IR.
+
+<details><summary>Manual two-step (what the CLI does under the hood)</summary>
+
 ```python
 from graphc import compile_project
 import json, subprocess
@@ -28,19 +42,10 @@ desc = compile_project("mybot/entry.py", ("tennis", "v15f"))
 json.dump(desc, open("mybot.desc.json", "w"))
 subprocess.run(["graphc-rs", "mybot.desc.json", "mybot.txt"], check=True)
 ```
+`cd <graphc checkout>` once — everything runs in place; `graphc-rs` is
+`cargo build --release` in this repo (`target/release/graphc-rs`).
+</details>
 
-Drop `mybot.txt` into `%USERPROFILE%\AppData\LocalLow\Unicorn One\AIComp\Saves\Tennis\`,
-load `mybot` in the node editor. Done — it serves, rallies, and swings.
-
-Three commands, total (no install — run from the repo checkout):
-```
-cd <graphc checkout>                                  # once (everything runs in place)
-compile_project("mybot/entry.py", ("tennis", "v15f"))   # bot -> graph IR
-graphc-rs mybot.desc.json mybot.txt                     # graph IR -> game save
-```
-`graphc-rs` is `cargo build --release` in this repo
-(`target/release/graphc-rs`); sensors resolve via `GRAPHC_PYLIB`
-(defaults to the sibling AIGamePyLibrary checkout, see below).
 
 ## How it works (the 1-minute version)
 
@@ -89,6 +94,43 @@ recursion (depth 32) are real and unroll inline — over-cap, sink-in-body,
 and depth-guard trips fail loudly with overflow canaries, never silently.
 Behaviour in game == behaviour coded.
 
+## Optimization modes (`optimize=`)
+
+Performance is already maximal — the only graph cost is per-tick node
+transitions — so the mode only decides **how much unnecessary material the
+compiler may drop**. Behavior and play strength are invariant (verified in
+the sim by `tests/compiler_mode_parity.rs`: the same bot at every mode
+produces identical controller output, tick by tick).
+
+| mode | frontend passes | emit |
+|------|-----------------|------|
+| `"raw"` | none | full chrome |
+| `"o0"` (default) | identity fold (`x*1`, `x/1`, `x-0`, `x**1`, `not(not)`, `select(c,t,t)`) + DCE; keeps debug sinks | full layout + chrome |
+| `"o1"` | o0 + drop debug sinks (`plot`, overflow canaries), re-run DCE | full layout + chrome |
+| `"o2"` | o1 | **core**: nodes at 0,0, no colors / port rects / connection chrome, dense base62 ids — smallest file |
+
+`compile_source` / `compile_project` take `optimize=`: `"o0"`/`"o1"`/`"o2"`
+(also ints `0/1/2`, and aliases `normal`/`release`/`core`). Leave it out and
+you get `o0`: fully optimised logic, and your `api.plot` debug channels still
+work. Ship `o2` for the smallest file. `graphc-rs <desc> <out> [mode]`
+overrides the description's mode.
+
+### Compacting any existing save (no source needed)
+
+Point `graphc-rs` at a save instead of a description and it auto-detects the
+mode:
+```
+graphc-rs Titanium.txt Titanium.core.txt o2
+```
+It keeps the bot's strength by construction: nodes are dropped **only** when
+nothing they produce can still reach a controller or a state sink. A value
+that feeds both a `TimePlot` and the controller is kept — only debug-exclusive
+chains vanish (this is the safe form of pylibry `stripDebugSinks`, which the
+ladder flags as unsafe when applied blindly). `o2` also removes layout/chrome
+(nodes at 0,0) and remaps ids to dense base62; `o0`/`o1` keep the editor
+chrome. Measured: `Titanium.txt` 4.6 MB → 1.54 MB with identical sim
+behavior for 60 ticks (`aia_comp-sim/tests/titanium_compact_parity.rs`).
+
 ## API reference
 
 Every sensor is a typed, documented function — hover in any IDE:
@@ -117,13 +159,15 @@ sinks (`move`/`plot`/`set_var`) hoist out of loop bodies.
 ## Under the hood (only if you care)
 
 - `graphc/ast_fe.py`: Python AST -> description IR (SSA phi-merge for
-  `if/else`, inlining, whitelist, `-O` DCE/select-fold; no arithmetic
-  folding, float bit-identity kept).
-- `graphc/desc.py`: language-neutral IR + (game, version) gates.
+  `if/else`, inlining, whitelist, `optimize=` passes — identity fold + DCE
+  behind a mode; no arithmetic/const folding, float bit-identity kept).
+- `graphc/desc.py`: language-neutral IR, (game, version) gates, and the
+  `OPTIMIZE_MODES` resolver.
 - `graphc-rs` (Rust): IR -> game save JSON, port tables pinned from
   AIGamePyLibrary, cost = **per-tick node transitions** (C# traversal
   overhead, not FLOPs), layered grid-snapped editor layout so the graph
-  reads left-to-right like the code.
+  reads left-to-right like the code (o0/o1); o2 strips layout and chrome
+  for the smallest save.
 - `aia_comp-sim` (sibling repo): headless VM replays every compiled save
   in CI before it ever touches the game.
 
@@ -136,10 +180,11 @@ assumed v0.14-identical until measured.
 - `GRAPHC_PYLIB` points at the AIGamePyLibrary checkout (sensor ABI);
   defaults to `C:\gitProjects\AIA_tennis\AIGamePyLibrary`.
 - Regenerate stubs: `python graphc/api/gen_api.py`.
-- Tests: `cargo test --lib` (backend, 11 green);
+- Tests: `cargo test --lib` (backend, 17 green);
   `python graphc/tests/test_misuse.py` (misuse battery),
   `test_calls.py` (call/closure semantics), `test_const_join.py`
-  (float bit-identity) — all runnable directly, no pytest needed.
+  (float bit-identity), `test_modes.py` (optimization modes) — all
+  runnable directly, no pytest needed.
 - Example rival bot: `examples/serve_latch_proj/` -> `graphc_rival.txt`
   (19 nodes, 41 transitions, beats aia3 7-0 in sim).
 - Example underdog: `examples/underdog/` (walk-to-incoming-bounce,

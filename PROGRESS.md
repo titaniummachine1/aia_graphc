@@ -1,5 +1,74 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 11 (2026-09-12: one-command front door)
+
+Usability pass (user directive: "make the compiler easier/more natural to use").
+The pipeline was always two commands plus manual `graphc-rs` path wrangling; now
+it is one.
+
+1. ✅ **`python -m graphc`** (`graphc/cli.py` + `graphc/__main__.py`):
+   `python -m graphc mybot/entry.py -o mybot.txt --install` compiles source →
+   IR → save and copies the save into the game's `Saves\Tennis\` (or
+   `Saves\Soccer\` for `--target soccer:v0.12`). Auto-discovers the backend at
+   `target/release/graphc-rs[.exe]` (override `--backend` / `GRAPHC_BACKEND`),
+   parses `game:version` targets (bare `tennis` → `v15f`, `soccer` → `v0.12`),
+   accepts a project dir (uses its `entry.py`), and can also dump the IR
+   (`--desc`), pick a mode (`-O o1`/`o2`) and stay quiet (`-q`).
+   - Errors still fail loudly: unknown target, missing entry/backend and any
+     backend non-zero exit are surfaced with the backend's own stderr.
+2. ✅ README "Simplest possible bot" now leads with the one-liner; the manual
+   two-step is kept in a collapsible block.
+
+No backend/IR changes; `cargo test --lib` untouched.
+
+## Session 10 (2026-09-11, compiler track: optimization modes + source-free compaction)
+
+User directive: "optimisation modes O0/O1/O2 ... only tell the compiler how
+much unnecessary stuff to drop; performance is already maximal (the only
+graph cost is per-tick node transitions)". And: "run the compression on any
+script even without Python — give you Titanium and you run o2/core ... without
+affecting strength." Done:
+
+1. ✅ **Modes** `raw` | `o0` (default) | `o1` | `o2` on
+   `compile_source`/`compile_project` (`optimize=`; ints 0/1/2; aliases
+   normal/release/core/debug/max). `graphc/desc.py`: `resolve_optimize` +
+   mode-aware `optimize_ops`. `graphc/ast_fe.py` carries the mode into the
+   desc (`"optimize"` field); `src/lib.rs` `Mode` parses it; `graphc-rs`
+   3rd arg overrides.
+   - `o0`: identity fold (`x*1`, `1*x`, `x/1`, `x**1`, `x-0`, `not(not)`,
+     `select(c,t,t)`) + DCE; keeps debug sinks + layout. Bit-safe only —
+     `x+0` is deliberately NOT folded (flips -0.0).
+   - `o1`: o0 + debug sinks (`plot`, overflow canaries) are not DCE roots;
+     everything that fed only debug disappears.
+   - `o2`: o1 + emit core (`core_strip`: no rects/colors/port rects/conn
+     chrome, nodes at 0,0; `remap_short_ids`: dense base62, now also remaps
+     `ownerFunctionSID` so functions survive).
+2. ✅ **Fixed a latent infinite loop** in `optimize_ops`: a folded op stayed
+   in the list and re-triggered the fold forever (old select-fold had the
+   same latent bug, never hit). Fix: rebuild to the live set each pass.
+3. ✅ **Source-free compactor** `src/compact.rs` + `graphc-rs` auto-detect:
+   give it any save (no Python/source) and it drops only what is provably
+   unnecessary — backward reachability from actions (`*Controller`,
+   `SetVariable`, array writes, `CreateFunction`) + non-debug terminals;
+   debug sinks are roots only when keeping debug. A producer feeding BOTH a
+   TimePlot and a controller is KEPT (the AIA/AIA3 failure pylibry's ladder
+   warns about). `compact` defaults to `o2`.
+   - `Titanium.txt` 4.64 MB → 1.54 MB (o2), 30 truly-dead nodes pruned,
+     identical sim behavior for 60 ticks.
+4. ✅ **Tests**: `graphc/tests/test_modes.py` (6); Rust 21/21 (mode parse,
+   core shrink, unknown-mode loud, compact keeps shared producer, o0 keeps
+   debug, o2 chrome+ids). Sim: `tests/compiler_mode_parity.rs` (same bot at
+   o0/o1/o2 → identical controller output 40 ticks + o0 debug TimePlots
+   work), `tests/titanium_compact_parity.rs` (any-save compaction, opt-in
+   `TITANIUM_ORIG`/`TITANIUM_COMPACT`). Probe pins updated 94/91 → 93/90.
+5. ✅ **Docs**: README "Optimization modes" + compact usage; `__init__` /
+   `desc` docstrings; sim `AGENTS.md` probe pins + mode-parity note.
+
+Compiler is now effectively **v1**: feature-complete for authoring + mode
+selection + arbitrary-save compaction. Only optional gaps remain (vector
+arithmetic ops; Lua frontend). Next real work is sim parity (see
+`aia_comp-sim/docs/HANDOFF.md`).
+
 ## Session 9 (2026-09-11, compiler track: plain-variable state + QOL)
 
 User directive: "replace api.set_var with just regular python variables —

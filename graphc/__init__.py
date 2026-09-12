@@ -40,6 +40,10 @@ Rules (enforced at trace time — the supported-API whitelist):
      compiler-verification surface (game TimePlot export == sim == pure VM).
 Cost model: per-tick node transitions (nodes + edges) — the C# per-tick
 overhead metric. graphc-rs prints the report; CI fails on regressions.
+Optimization modes (`compile_*`'s `optimize=` / graphc-rs's optional 3rd
+arg) only control how much unnecessary material is dropped: "raw" (no
+passes), "o0" (default, identity fold + DCE, keeps debug sinks), "o1"
+(o0 + drop debug sinks), "o2" (o1 + strip visual chrome, dense ids).
 
 Simple-use contract (humans + LLMs): write plain Python with the
 AIA_Comp_Libry API (import AIA_Comp_Libry.tennis.v15f as t); every value
@@ -66,9 +70,11 @@ if PYLIB not in sys.path:
 
 from .ast_fe import compile_project, compile_source
 from .desc import (
+    OPTIMIZE_MODES,
     SUPPORTED_TARGETS,
     check_target,
     describe,
+    resolve_optimize,
     soccer_sensor_index,
     tennis_sensor_index,
 )
@@ -81,4 +87,6 @@ __all__ = [
     "soccer_sensor_index",
     "SUPPORTED_TARGETS",
     "check_target",
+    "OPTIMIZE_MODES",
+    "resolve_optimize",
 ]
