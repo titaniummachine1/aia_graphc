@@ -105,5 +105,7 @@ def tick(api):
     api.plot("T.walk_x", walk_x)
     api.plot("T.walk_z", walk_z)
     api.plot("T.chase", chase)
+    api.plot("T.oti", intercept._his_tier())
+    api.plot("T.mti", intercept._our_tier())
     t.aim(aim_x, aim_z)
     t.move(walk_x, walk_z, swing, shot_id, sprint)

@@ -491,89 +491,147 @@ def receive_z():
 
 # ---- positioning: virtual ball (his best reply before it exists) ----
 
+def _vfeas(px, pz, s, r, ex, ez, vx, vz):
+    # One footrace solve, no height gate (virtual balls have no altitude):
+    # can the chaser at (px,pz) meet a ball at (ex,ez)~(vx,vz) with speed s
+    # and ring r? Shared by every ladder, both perspectives.
+    v2 = vx * vx + vz * vz
+    a = v2 - s * s
+    if api.abs(a) < 0.01:
+        a = 0.01
+    dx = ex - px
+    dz = ez - pz
+    b = 2.0 * (vx * dx + vz * dz - s * r)
+    c = dx * dx + dz * dz - r * r
+    disc = b * b - 4.0 * a * c
+    if disc < 0.0:
+        return 0.0
+    sq = api.sqrt(disc)
+    te = (0.0 - b - sq) / (2.0 * a)
+    tx = (0.0 - b + sq) / (2.0 * a)
+    if a > 0.0:
+        if tx > 0.0:
+            return 1.0
+        else:
+            return 0.0
+    else:
+        if te > 0.0:
+            return 1.0
+        else:
+            return 0.0
+
+
+def _vtier(px, pz, ex, ez, vx, vz):
+    # How far the victim must extend down the ladder: 0 walk, 1 sprint,
+    # 2 racket ring, 3 swing ring, 4 unreachable. Same tiers, both sides.
+    if _vfeas(px, pz, WALK, 0.0, ex, ez, vx, vz) > 0.5:
+        return 0.0
+    if _vfeas(px, pz, SPRINT, 0.0, ex, ez, vx, vz) > 0.5:
+        return 1.0
+    if _vfeas(px, pz, SPRINT, R_RACKET, ex, ez, vx, vz) > 0.5:
+        return 2.0
+    if _vfeas(px, pz, SPRINT, R_SWING, ex, ez, vx, vz) > 0.5:
+        return 3.0
+    return 4.0
+
+
+def _vscore(px, pz, lx, lz, tx, tz):
+    # THE shared minimax evaluator, both directions: how hard is it for the
+    # victim at (px,pz) to intercept a ball launched at (lx,lz) toward
+    # (tx,tz)? Score = ladder tier * 1000 + required speed — the further the
+    # victim must extend down the ladder, the better for the shooter.
+    ddx = tx - lx
+    ddz = tz - lz
+    d_lp = api.sqrt(ddx * ddx + ddz * ddz)
+    tf = _fast_t(d_lp)
+    bvx = ddx / tf
+    bvz = ddz / tf
+    tier = _vtier(px, pz, lx, lz, bvx, bvz)
+    vdx = tx - px
+    vdz = tz - pz
+    slack = api.sqrt(vdx * vdx + vdz * vdz) - R_SWING
+    if slack < 0.0:
+        slack = 0.0
+    den = tf
+    if den < 0.2:
+        den = 0.2
+    if den > 10.0:
+        den = 10.0
+    return tier * 1000.0 + slack / den
+
+
+def _his_tier():
+    # Which ladder rung HE wins on the live ball (0 walk .. 4 unreachable):
+    # tells us if he is sprinting, from the same ladder, no second logic.
+    if _ho_ok(0) > 0.5:
+        return 0.0
+    if _ho_ok(1) > 0.5:
+        return 1.0
+    if _ho_ok(2) > 0.5:
+        return 2.0
+    if _ho_ok(3) > 0.5:
+        return 3.0
+    return 4.0
+
+
+def _our_tier():
+    if _w_ok() > 0.5:
+        return 0.0
+    if _s_ok() > 0.5:
+        return 1.0
+    if _r_ok() > 0.5:
+        return 2.0
+    if _v_ok() > 0.5:
+        return 3.0
+    return 4.0
+
+
 def _danger_x():
-    # His hardest reply point on our half (max required catch speed,
-    # tiebreak: wider angle off his launch). Fixed 6-point grid.
+    # His hardest reply point on our half, scored by the shared evaluator.
+    # Same function as our attack scan, opposite direction.
     s = _own_sign()
     ox = opp_meet_x()
     oz = opp_meet_z()
-    Tm = opp_t_meet()
-    if Tm < 0.0:
-        Tm = 0.0
-    if Tm > 2.0:
-        Tm = 2.0
-    head = WALK * Tm
+    ux = _self_x()
+    uz = _self_z()
+    best_s = 0.0 - 1.0
     best_x = s * 14.0
-    best_fit = 0.0 - 1.0
-    best_dot = 2.0
-    sx = _self_x()
-    sz = _self_z()
-    ux = sx - ox
-    uz = sz - oz
-    ulen = api.clamp(api.sqrt(ux * ux + uz * uz), 0.001, 100.0)
-    for i in range(6):
-        if i == 0:
-            px = s * 14.0
-            pz = 6.0
-        if i == 1:
-            px = s * 14.0
-            pz = 0.0 - 6.0
-        if i == 2:
-            px = s * 7.0
-            pz = 6.0
-        if i == 3:
-            px = s * 7.0
-            pz = 0.0 - 6.0
-        if i == 4:
-            px = s * 1.0
-            pz = 6.0
-        if i == 5:
-            px = s * 1.0
-            pz = 0.0 - 6.0
-        audx = px - sx
-        audz = pz - sz
-        d_us = api.sqrt(audx * audx + audz * audz)
-        ahdx = px - ox
-        ahdz = pz - oz
-        d_his = api.sqrt(ahdx * ahdx + ahdz * ahdz)
-        slack = d_us - R_SWING - head
-        if slack < 0.0:
-            slack = 0.0
-        tf = 0.214 + 0.0257 * d_his
-        cand = 0.498 + 0.0034 * d_his
-        if cand < tf:
-            tf = cand
-        cand = 0.285 + 0.0178 * d_his
-        if cand < tf:
-            tf = cand
-        cand = 0.517 + 0.0069 * d_his
-        if cand < tf:
-            tf = cand
-        cand = 0.235 + 0.0160 * d_his
-        if cand < tf:
-            tf = cand
-        den = tf
-        if den < 0.2:
-            den = 0.2
-        if den > 10.0:
-            den = 10.0
-        req = slack / den
-        vx = px - ox
-        vz = pz - oz
-        vlen = api.clamp(api.sqrt(vx * vx + vz * vz), 0.001, 100.0)
-        dot = (vx * ux + vz * uz) / (vlen * ulen)
-        if req > best_fit + 0.35:
-            worse = 1.0
-        else:
-            worse = 0.0
-        if worse < 0.5:
-            if api.abs(req - best_fit) <= 0.35:
-                if dot < best_dot:
-                    worse = 1.0
-        if worse > 0.5:
-            best_x = px
-            best_fit = req
-            best_dot = dot
+    px = s * 14.0
+    pz = 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_x = px
+    px = s * 14.0
+    pz = 0.0 - 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_x = px
+    px = s * 7.0
+    pz = 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_x = px
+    px = s * 7.0
+    pz = 0.0 - 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_x = px
+    px = s * 1.0
+    pz = 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_x = px
+    px = s * 1.0
+    pz = 0.0 - 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_x = px
     return best_x
 
 
@@ -582,83 +640,46 @@ def _danger_z():
     s = _own_sign()
     ox = opp_meet_x()
     oz = opp_meet_z()
-    Tm = opp_t_meet()
-    if Tm < 0.0:
-        Tm = 0.0
-    if Tm > 2.0:
-        Tm = 2.0
-    head = WALK * Tm
+    ux = _self_x()
+    uz = _self_z()
+    best_s = 0.0 - 1.0
     best_z = 6.0
-    best_fit = 0.0 - 1.0
-    best_dot = 2.0
-    sx = _self_x()
-    sz = _self_z()
-    ux = sx - ox
-    uz = sz - oz
-    ulen = api.clamp(api.sqrt(ux * ux + uz * uz), 0.001, 100.0)
-    for i in range(6):
-        if i == 0:
-            px = s * 14.0
-            pz = 6.0
-        if i == 1:
-            px = s * 14.0
-            pz = 0.0 - 6.0
-        if i == 2:
-            px = s * 7.0
-            pz = 6.0
-        if i == 3:
-            px = s * 7.0
-            pz = 0.0 - 6.0
-        if i == 4:
-            px = s * 1.0
-            pz = 6.0
-        if i == 5:
-            px = s * 1.0
-            pz = 0.0 - 6.0
-        audx = px - sx
-        audz = pz - sz
-        d_us = api.sqrt(audx * audx + audz * audz)
-        ahdx = px - ox
-        ahdz = pz - oz
-        d_his = api.sqrt(ahdx * ahdx + ahdz * ahdz)
-        slack = d_us - R_SWING - head
-        if slack < 0.0:
-            slack = 0.0
-        tf = 0.214 + 0.0257 * d_his
-        cand = 0.498 + 0.0034 * d_his
-        if cand < tf:
-            tf = cand
-        cand = 0.285 + 0.0178 * d_his
-        if cand < tf:
-            tf = cand
-        cand = 0.517 + 0.0069 * d_his
-        if cand < tf:
-            tf = cand
-        cand = 0.235 + 0.0160 * d_his
-        if cand < tf:
-            tf = cand
-        den = tf
-        if den < 0.2:
-            den = 0.2
-        if den > 10.0:
-            den = 10.0
-        req = slack / den
-        vx = px - ox
-        vz = pz - oz
-        vlen = api.clamp(api.sqrt(vx * vx + vz * vz), 0.001, 100.0)
-        dot = (vx * ux + vz * uz) / (vlen * ulen)
-        if req > best_fit + 0.35:
-            worse = 1.0
-        else:
-            worse = 0.0
-        if worse < 0.5:
-            if api.abs(req - best_fit) <= 0.35:
-                if dot < best_dot:
-                    worse = 1.0
-        if worse > 0.5:
-            best_z = pz
-            best_fit = req
-            best_dot = dot
+    px = s * 14.0
+    pz = 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_z = pz
+    px = s * 14.0
+    pz = 0.0 - 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_z = pz
+    px = s * 7.0
+    pz = 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_z = pz
+    px = s * 7.0
+    pz = 0.0 - 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_z = pz
+    px = s * 1.0
+    pz = 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_z = pz
+    px = s * 1.0
+    pz = 0.0 - 6.0
+    sc = _vscore(ux, uz, ox, oz, px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_z = pz
     return best_z
 
 

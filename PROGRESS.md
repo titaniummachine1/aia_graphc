@@ -1,5 +1,16 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 20 (2026-09-13: one shared minimax, tier-scored)
+
+- Attack and danger scans unified on `_vscore` (intercept.py): victim vs a
+  virtual ball from the launch — score = ladder tier * 1000 + required
+  speed, both directions, no duplicate logic. Shot search runs from our
+  position (attack) and from his interception point (danger); his win-tier
+  (`_his_tier`, same ladder) tells us if he sprints. Source-level blocks
+  (loop bodies can't call helpers) share everything in-graph via CSE.
+- Verified: 3159 nodes / 6732 transitions / 0 numeric leaks, sim 7-0 vs
+  stock, self-play splits by server side, deployed as `titaniumpy`.
+
 ## Session 19 (2026-09-13: `while` banned — finite-state, not Turing-complete)
 
 - `while` is now a loud compile error pointing at bounded `for`
