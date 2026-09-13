@@ -48,8 +48,8 @@ Bounded control flow (unrolled/inlined at compile time — the game runs
 the flat graph, so per-tick cost stays static and reported):
     for i in range(a[, b[, s]])   literal-int trips, unrolled (cap 16384).
                                   Pure accumulation; break/continue allowed.
-    while cond:                   unrolled to MAX_WHILE_TRIPS (512) with an
-                                  overflow canary plot (!!while_overflow).
+    while cond:                   BANNED (no guaranteed trip count under
+                                  mandatory unrolling) — use bounded `for`.
     def f(...): ... f(...)        direct/indirect self-call inlines to
                                   MAX_REC_DEPTH (128) with an overflow canary
                                   (!!recursion_overflow). Single tail return;
@@ -150,7 +150,9 @@ LIBRY = "AIA_Comp_Libry"
 # Caps below are only the loud guards before the game/sim itself refuses
 # the graph.
 MAX_FOR_TRIPS = 16384
-MAX_WHILE_TRIPS = 512
+# NOTE (2026-09-13): `while` is banned outright (see the ast.While arm) —
+# unrolling is target-forced and a while has no guaranteed trip count, so
+# no bound is sound. The language is intentionally finite-state.
 # Recursion budget matches the sim's Function-nesting cap (lower.rs): both
 # raised together 64 -> 128, so the sim never silently Nulls what we emit.
 MAX_REC_DEPTH = 128
@@ -244,9 +246,9 @@ class _Ctx:
         # for the next tennis_move (autoswitch — walk wire untouched);
         # one aim per tick, and never without its controller.
         self._aim_pending: bool = False
-        # Bounded control flow (for/while/recursion unroll inline — flat graph
+        # Bounded control flow (for/recursion unroll inline — flat graph
         # out, static cost): _loop_stack frames gate assignments under
-        # break/continue/while-exit; _cond_stack holds enclosing if-conditions
+        # break/continue; _cond_stack holds enclosing if-conditions
         # (op id, polarity) for exact exit/overflow accounting; _rec_over
         # collects per-function overflow sites for end-of-compile canaries.
         self._loop_stack: list = []
@@ -265,7 +267,7 @@ class _Ctx:
         self._static_ret: list = []
         # Trace-time static domain (SCCP-lite: ints with abs < 2**24,
         # bools): exact Python-int semantics, f32-exact range, used ONLY to
-        # prune branches (if/while arm selection, recursion base cases).
+        # prune branches (if arm selection, recursion base cases).
         # Values ALWAYS lower through the normal float ops — never folded —
         # so game bit-identity is untouched. Anything float-flavored,
         # dynamic, or out of range is simply absent (Unknown) and takes the
@@ -1323,11 +1325,11 @@ def _tag_static(ctx: _Ctx, op_id: int, value) -> None:
 
 # --- bounded loops + recursion (compile-time unroll/inline) ---------------
 #
-# The game has no loop or call-stack nodes, so control flow is compiled
-# away: for/while bodies are traced once per trip (straight-line SSA),
-# self-calls inline to a depth budget. The emitted graph is flat, which
-# keeps the per-tick transition cost static and exactly reported.
-# Overflow past a cap is never silent: while/recursion carry an
+# The game has no loop or call-stack nodes, and no `while`: control flow
+# is compiled away: for bodies are traced once per trip (straight-line
+# SSA), self-calls inline to a depth budget. The emitted graph is flat,
+# which keeps the per-tick transition cost static and exactly reported.
+# Overflow past a cap is never silent: recursion carries an
 # auto-plotted `!!` canary (nonzero = exceeded, check the TimePlot).
 
 
@@ -1352,8 +1354,8 @@ class _LoopFrame:
     def __init__(self) -> None:
         self.exited: int = -1
         self.skipped: int = -1
-        # may_gate: some path may deactivate iterations (while, or a
-        # conditional break/continue seen) — assignments must select-gate.
+        # may_gate: some path may deactivate iterations (a conditional
+        # break/continue seen) — assignments must select-gate.
         # dirty: a flag op was actually updated (gating is provably exact
         # before the first update, so plain loops emit zero extra nodes).
         self.may_gate: bool = False
@@ -1442,12 +1444,12 @@ def _gate_assign(ctx: _Ctx, name: str, new: int) -> int:
     if prev is None:
         raise SyntaxError(
             f"{name!r} is first assigned under a possibly-inactive path "
-            "(break/continue/while-exit) — initialize it before the loop")
+            "(break/continue) — initialize it before the loop")
     t = ctx._typeof(new)
     if t not in ("float", "bool", "vector"):
         raise SyntaxError(
             f"only float/bool/vector accumulators survive "
-            f"break/continue/while — {name!r} is {t} (compute it after "
+            f"break/continue — {name!r} is {t} (compute it after "
             "the loop)")
     if ctx._typeof(prev) != t:
         raise SyntaxError(
@@ -1527,7 +1529,11 @@ def _drive_loop(ctx: _Ctx, s, loopvar: str | None, trips: list,
                 implicit_cond: ast.expr | None, canary: str | None) -> None:
     """Trace a loop body once per trip (SSA accumulation across trips).
 
+    (`while` is banned at the ast.While arm, so loopvar is always set and
+    implicit_cond/canary always None — the parameters stay for signature
+    stability; the while paths below are dormant.)
     loopvar=None for while (hidden counter). implicit_cond (while only)
+    is re-traced every trip as an internal `if not cond: break`.
     is re-traced every trip as an internal `if not cond: break`.
     canary (while only) names the overflow plot (emitted iff the cap may
     have been hit — always, since trips are dynamic).
@@ -1575,8 +1581,7 @@ def _drive_loop(ctx: _Ctx, s, loopvar: str | None, trips: list,
                 if j.kind == "break" and j.uncond and \
                         implicit_cond is None:
                     break  # remaining trips provably dead
-                # conditional jump (or any jump in while): later trips
-                # stay gated, keep unrolling
+                # conditional jump: later trips stay gated, keep unrolling
                 continue
     finally:
         ctx._loop_stack.pop()
@@ -1866,12 +1871,12 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
                 "across ticks)")
         _drive_loop(ctx, s, s.target.id, trips, None, None)
     elif isinstance(s, ast.While):
-        if s.orelse:
-            raise SyntaxError(
-                "while/else is not compilable yet — restructure with a "
-                "flag variable")
-        _drive_loop(ctx, s, None, list(range(MAX_WHILE_TRIPS)), s.test,
-                    f"!!while_overflow:L{s.lineno}")
+        raise SyntaxError(
+            "while loops are banned (2026-09-13, measured: the game evaluates "
+            "once per tick, so unrolling is target-forced and a `while` has no "
+            "guaranteed trip count) — use `for i in range(literal)` with a "
+            "literal bound (exact unroll, trips reported). The language is "
+            "intentionally finite-state, not Turing-complete.")
     elif isinstance(s, ast.Break):
         _loop_jump(ctx, "break")
     elif isinstance(s, ast.Continue):
@@ -1892,7 +1897,7 @@ def _stmt(ctx: _Ctx, s: ast.stmt) -> None:
     else:
         raise SyntaxError(
             f"unsupported statement {type(s).__name__} — loops are "
-            "for i in range(...) / while cond (bounded, unrolled); "
+            "for i in range(literal) (bounded, unrolled); "
             "express cross-tick state with api.set_var")
 
 

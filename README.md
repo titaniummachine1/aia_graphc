@@ -89,17 +89,18 @@ subprocess.run(["graphc-rs", "mybot.desc.json", "mybot.txt"], check=True)
 
 ## The guarantee (idiot-proofing)
 
-33-case misuse battery (`graphc/tests/test_misuse.py`, run it directly —
+34-case misuse battery (`graphc/tests/test_misuse.py`, run it directly —
 all loud, zero silent miscompiles): shadowed `api`, double controllers /
 double latch writes (same cell twice), stdlib/star/missing imports, wrong
 game or version, unknown sensors, tuple unpacking, subscripts of
 non-tables, `and`/`or`, ternaries, walrus, chained comparisons, `break`
-outside loops, non-literal `range`, sinks inside loop bodies, missing
+outside loops, non-literal `range`, `while` (banned — no guaranteed trip
+count under mandatory unrolling), sinks inside loop bodies, missing
 returns, bad arity, undefined names, top-level statements, plus project
 rules (one `tick`, no conflicting constants). Bounded
-`for range(literal)` (16384) / `while` (512) / recursion (depth 128) are
-real and unroll inline — over-cap, sink-in-body, and depth-guard trips
-fail loudly with overflow canaries, never silently.
+`for range(literal)` (16384) / recursion (depth 128) are real and unroll
+inline — over-cap, sink-in-body, and depth-guard trips fail loudly with
+overflow canaries, never silently.
 Behaviour in game == behaviour coded.
 
 ## Optimization modes (`optimize=`)
@@ -201,9 +202,10 @@ mybot/
   consts.py     # SECOND_SERVE_SHORTEN = 0.5
 ```
 Rules: one `tick(api)`, helpers return one float each, numeric constants
-at top level. Bounded loops are fine (`for i in range(19)`, `while` cap
-512, recursion depth 128 — all unroll to flat graphs with `!!` overflow
-canaries); cross-tick state lives in latches (`api.var`/`set_var`), and
+at top level. Bounded loops are fine (`for i in range(19)`, recursion depth
+128 — both unroll to flat graphs with `!!` overflow canaries); `while` is
+banned (unrolling is target-forced, no trip count is guaranteed sound);
+cross-tick state lives in latches (`api.var`/`set_var`), and
 sinks (`move`/`plot`/`set_var`) hoist out of loop bodies. Measured v15f
 ceiling: 12288-trip loop (37MB / 24.6k traversals) plays, 16384-trip (50MB
 / 32.8k) dies on load — treat ~26k traversals / ~40MB size as the

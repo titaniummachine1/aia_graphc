@@ -62,8 +62,13 @@ CASES: list[tuple[str, str, tuple[str, str] | None]] = [
     ("tuple unpack", "def tick(api):\n    a, b = 1, 2\n    api.move(a, b)\n", None),
     ("chained comparison",
      "def tick(api):\n    x = 1\n    y = 1 if 0 < x < 2 else 2\n    api.move(y, 0)\n", None),
-    # --- loops (3): bounded only; jumps need their loop; sinks hoist out
+    # --- loops (5): bounded only; `while` banned outright; jumps need
+    # their loop; sinks hoist out
     ("break outside loop", "def tick(api):\n    x = 1\n    break\n    api.move(0, 0)\n", None),
+    ("while loop banned",
+     "def tick(api):\n    s = 0\n    while s < 10:\n        s = s + 1\n"
+     "    api.move(s, 0)\n",
+     None),
     ("range over variable",
      "def tick(api):\n    n = 5\n    s = 0\n    for i in range(n):\n        s = s + 1\n"
      "    api.plot('C', s)\n    api.move(0, 0)\n",
@@ -113,7 +118,7 @@ def test_misuse_battery() -> None:
             continue
         failures.append(f"{name}: COMPILED SILENTLY (must fail loudly)")
     assert not failures, "misuse battery leaks:\n" + "\n".join(failures)
-    assert len(CASES) == 33, f"battery shrank: {len(CASES)} cases"
+    assert len(CASES) == 34, f"battery shrank: {len(CASES)} cases"
 
 
 def test_project_rules() -> None:

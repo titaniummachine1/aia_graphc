@@ -1,5 +1,15 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 19 (2026-09-13: `while` banned — finite-state, not Turing-complete)
+
+- `while` is now a loud compile error pointing at bounded `for`
+  (`MAX_WHILE_TRIPS` removed): unrolling is target-forced (measured
+  single-pass-per-tick, ModHost v0.15f — see
+  `AIA_tennis/modhost/LOOP_SEMANTICS.md`), so a `while` has no guaranteed
+  trip count and no bound is sound. Only `for range(literal)` + depth-128
+  recursion remain. Misuse battery 33->34 cases (all suites green, titanium
+  recompiles byte-identical counts).
+
 ## Session 18 (2026-09-13: v54-technique rewrite + loop semantics measured)
 
 - Titanium rewritten to the recovered v54 algorithm (`AIA_tennis/titanium/

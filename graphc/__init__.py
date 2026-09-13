@@ -22,9 +22,10 @@ Rules (enforced at trace time — the supported-API whitelist):
      non-literal range, sinks in loop bodies, bad arity, top-level
      statements, conflicting constants — all loud.
     - Dynamic `if` is real syntax (SSA phi-merge via select nodes);
-      bounded `for i in range(literal)` (cap 16384) / `while` (cap 512) /
-      recursion (depth 128) unroll inline to flat graphs (overflow canaries,
-      sinks hoisted out); cross-tick state lives in api.var/api.set_var
+      bounded `for i in range(literal)` (cap 16384) / recursion (depth 128)
+      unroll inline to flat graphs (overflow canaries, sinks hoisted out);
+      `while` is banned (no guaranteed trip count under mandatory unrolling);
+      cross-tick state lives in api.var/api.set_var
       latches and api.array cells (both arms evaluate per tick — semantics
       match the game). Cost model: connection traversals per tick first, size ties.
    - Multi-file projects via compile_project (imports resolved, functions
