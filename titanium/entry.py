@@ -42,12 +42,13 @@ def tick(api):
         struck = struck + 1.0
 
     # --- feet: minimax cover (walk ladder, then stamina-gated sprint) ---
-    # Serve receive: interception before the bounce is impossible (Must
-    # Wait For Bounce), so hold the predictive receive stance (1.05u
-    # behind bounce 1 towards bounce 2, else in-game Receive Stance).
+    # Serve receive: while Must Wait For Bounce is true, interception is
+    # impossible, so hold the receive spot (predictive 1.05u past bounce 1
+    # towards bounce 2 once known, else in-game Receive Stance) — no
+    # interception code runs. The moment it clears, normal rally: chase
+    # and strike (volley included).
     stance = t.serve_stance()
     must_wait = t.must_wait_for_bounce()
-    serve_phase = t.is_serve_phase()
     if serving:
         walk_x = api.split_vector(stance, 0)
         walk_z = api.split_vector(stance, 2)
@@ -60,12 +61,8 @@ def tick(api):
                 walk_x = intercept.plan_x()
                 walk_z = intercept.plan_z()
             else:
-                if serve_phase:
-                    walk_x = intercept.receive_x()
-                    walk_z = intercept.receive_z()
-                else:
-                    walk_x = intercept.home_x()
-                    walk_z = intercept.home_z()
+                walk_x = intercept.home_x()
+                walk_z = intercept.home_z()
 
     # --- strike type (dropdown ids, NOT game args: 0/1/2) ---
     ball = t.ball_position()
