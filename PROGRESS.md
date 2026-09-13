@@ -1,5 +1,26 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 15 (2026-09-13: verification round, all pushed)
+
+- Pushed: graphc `159edc9` (session 14), sim `344cb48` (lower.rs only),
+  modhost `d9728a2` + probe commit (ladder driver, results, serve probe).
+- helperdemo (abs/sqrt/sign/clamp/dot/bool_and/bool_or + vector and bool
+  selects in one bot) played a full v15f point: `H.c` live 42.5→62.4,
+  DONE, no crash. New nodes are game-proven, not just sim-proven.
+- Serve-aim strategy DECIDED: `Center Of Legal Serve Area` and `Receive
+  Stance` read stub constants ((1,?,0) and (0,?,1)) in v0.14 AND v15f —
+  probed both sides, both roles, 10k+ samples (probe_servearea, 43 nodes).
+  Not a mirror bug: no role/side dependence at all. Serve Stance (index 6)
+  is alive and correct-sided. Port rule: hardcode diagonal-box aims from
+  court geometry (serves already land via world fallback — 0 faults).
+  Alias `t.center_of_legal_serve_area()` kept (byte-identical, index 8).
+- Sim `docs/GRAPH_COMPILER.md` corrected where it described the PoC
+  sketch instead of the built compiler (mixed-radix arrays, cross-tick
+  loop machines, every-variable-a-latch).
+- Compiler preparation declared DONE: every blowup path is loud, misuse
+  33+16+6, game ceiling measured, all suites green. No more capacity work
+  scheduled before the titanium port.
+
 ## Session 14 (2026-09-13: titanium gap helpers + typed selects)
 
 Exhaustive titanium54 cross-check (latest save): abs(59)/sqrt(45)/sign(3)
