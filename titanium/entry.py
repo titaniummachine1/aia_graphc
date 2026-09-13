@@ -42,17 +42,30 @@ def tick(api):
         struck = struck + 1.0
 
     # --- feet: minimax cover (walk ladder, then stamina-gated sprint) ---
+    # Serve receive: interception before the bounce is impossible (Must
+    # Wait For Bounce), so hold the predictive receive stance (1.05u
+    # behind bounce 1 towards bounce 2, else in-game Receive Stance).
     stance = t.serve_stance()
+    must_wait = t.must_wait_for_bounce()
+    serve_phase = t.is_serve_phase()
     if serving:
         walk_x = api.split_vector(stance, 0)
         walk_z = api.split_vector(stance, 2)
     else:
-        if incoming:
-            walk_x = intercept.plan_x()
-            walk_z = intercept.plan_z()
+        if must_wait:
+            walk_x = intercept.receive_x()
+            walk_z = intercept.receive_z()
         else:
-            walk_x = intercept.home_x()
-            walk_z = intercept.home_z()
+            if incoming:
+                walk_x = intercept.plan_x()
+                walk_z = intercept.plan_z()
+            else:
+                if serve_phase:
+                    walk_x = intercept.receive_x()
+                    walk_z = intercept.receive_z()
+                else:
+                    walk_x = intercept.home_x()
+                    walk_z = intercept.home_z()
 
     # --- strike type (dropdown ids, NOT game args: 0/1/2) ---
     ball = t.ball_position()
@@ -81,6 +94,9 @@ def tick(api):
         corner = aim.pick_z(opp_z, last_side)
         risk = api.clamp(t.rally_fatigue() + t.deuce_fatigue(), 0.0, 1.0)
         aim_x = aim.rally_deep_x(base_x)
+        # 1-ply: open court, blended central by fatigue. (The 2-ply
+        # reply-backprop was reverted for real-game frame cost — the game
+        # is NOT memoized, so each extra evaluation fans out.)
         aim_z = aim.blend_corner(corner, risk)
 
     last_side = next_side(last_side, aim_z)

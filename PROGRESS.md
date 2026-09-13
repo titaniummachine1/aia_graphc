@@ -1,5 +1,58 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 17 (2026-09-13: commit label fix + serve-receive stance)
+
+- Committed the Session 16 label-vs-index fix (emitter writes Unity TEXT,
+  label-less sensor = hard error) with its regression tests (graphc 26/26).
+- Titanium serve receive: interception before the serve bounce is impossible
+  (game enforces Must Wait For Bounce), so `intercept.receive_x/z` holds a
+  predictive stance — 1.05u behind bounce 1 towards bounce 2 — with fallback
+  to in-game Receive Stance until `Ball Time To Ground` shows the aim is
+  known. `plan_x/z` gate on `must_wait_for_bounce`; `entry.py` routes
+  must-wait + serve-phase receivers to receive instead of the minimax chase.
+- Verified: titanium v15f compiles (308 nodes, 20 tennis sensors, 0 numeric
+  modifiers, new sensors Must Wait/Receive Stance/2nd Bounce present) and the
+  save runs in the sim (tennis_tournament vs stock, 4 points, 4-0, no
+  unimplemented nodes).
+
+## Session 16 (2026-09-13: tennis sensor modifier = Unity TEXT, not index)
+
+**Bug (root cause of "titanium57 sweeps the sim, cannot hit the ball in the
+real game"):** the backend emitted `Op::TennisGet` as
+`em.node(node_kind, index.to_string())`, but `TennisGetBool/Float/Vector3/
+Transform` and `TennisAutoSwing` are `DROPDOWN_MODIFIER_AS_LABEL` nodes
+(`AIGamePyLibrary/data.py`): Unity matches the dropdown on the option **text**,
+so `modifier = "0"` names no option — the gate holds its default and every ball
+sensor reads dead (`Ball Position == (0,0,0)`) for the whole match. Saves proved
+it: working bots (`titanium54`, `Adam`, `Apex`,
+`PerfectController_baseline`) store `"Ball Position"`; graphc saves stored `"0"`.
+
+- Emitter now writes the IR's `label`; a label-less sensor is a **hard compile
+  error** (an index is not a fallback — nothing game-side can resolve it).
+  `TennisAutoSwing` already wrote labels and still validates its mode.
+- Sim made strict so it cannot mask this class again:
+  `graph::dropdowns::is_dead_label_modifier` (`label_matched` =
+  the vendor set) blocks the index->label upgrade in
+  `resolve_for_version` *and* on the version-unknown `load` path;
+  `ApiSlotTable::intern` mirrors the game (dead `UNKNOWN_ID` slot) for a bare
+  index, and still refuses **loudly** for a live-but-unpinned label (its catalog
+  is builder-ordered, so guessing there is the phantom-entry bug).
+- Regression tests pinning it: `tennis_sensors_emit_unity_labels_not_indices`
+  + `tennis_sensor_without_label_is_a_loud_error` (graphc, 24->26),
+  `numeric_modifier_on_label_matched_sensor_is_dead` +
+  `label_matched_is_the_vendor_label_modifier_set` +
+  `numeric_modifier_on_ordinary_node_is_untouched` +
+  `dead_label_modifier_predicate` (sim dropdowns),
+  `numeric_tennis_modifier_interns_dead_and_unpinned_label_refuses` (sim
+  lower). Sim lib 176->182, graphc 24->26, integration suites all green.
+- Measured after the fix: titanium (`v15f`, 266 nodes) has 15 tennis sensor
+  nodes, **0 numeric modifiers**, vocabulary matching the in-game
+  `titanium54.txt`.
+- Write-up + evidence + which sim mode can simulate what:
+  `aia_comp-sim/docs/TENNIS_MODIFIER_ENCODING.md` (cross-linked from
+  `aia_comp-sim/docs/GRAPH_COMPILER.md` section 7).
+
+
 ## Session 15 (2026-09-13: verification round, all pushed)
 
 - Pushed: graphc `159edc9` (session 14), sim `344cb48` (lower.rs only),

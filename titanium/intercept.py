@@ -21,9 +21,21 @@ and the ball still must fly bounce->corner. Ladder, earliest first:
   2. else the same 3 steps SPRINTING — only if stamina is above threshold
      AND sprint lands inside the perfect window (arrive <=1s early —
      sprinting into a camp scores LATE all the same);
-  3. else walk the landing, best effort.
-Stamina: below threshold we only ever walk (sprint drains 0.010/tick,
-walking is neutral).
+  3. else EARLY cutoff, not the landing: walk at the ball's CURRENT
+     position — meet it head-on up the path (first zone tick, stretched)
+     rather than jammed late at the landing. Lob exception: ball above
+     2.5m will come down elsewhere, so take the landing instead.
+
+Tier rules (game truth, sim-mirrored): contact inside the 1.0m perfect
+radius on the FIRST zone tick is PERFECT; 2nd+ tick anywhere is LATE;
+first 2.6m-zone tick outside perfect is EARLY. The auto-swing holds and
+auto-contacts in the perfect window; an explicit swing connects anywhere
+in 2.6m (tiered). Every strike costs 0.36s recover. Standing ON the
+ball's path early is perfect (auto-contact at 1m as it arrives); the
+ladder's set-margin (0.1s, feet set before contact) plus the no-camp
+rule encode exactly this. Sim models no physics penalty per tier —
+game-side recoil is real but unmeasured (contact-grading fixture
+uncaptured), so the code plays for perfect and degrades to early.
 """
 import AIA_Comp_Libry.tennis.v15f as t
 
@@ -42,6 +54,57 @@ def home_x():
 
 def home_z():
     return api.split_vector(t.center_of_back(), 2)
+
+
+def _recv_known():
+    # Landing prediction available once the game knows where the
+    # opponent aims (time-to-ground > 0; 0.0 while the ball is dead).
+    if t.ball_time_to_ground() > 0.05:
+        return 1.0
+    else:
+        return 0.0
+
+
+def receive_x():
+    # Predictive receive stance: 1.05 units behind the FIRST bounce
+    # towards the SECOND bounce (room to swing after it lands).
+    # Fallback: in-game Receive Stance until the aim is known.
+    # (Interception before the serve bounce is impossible — the game
+    # enforces Must Wait For Bounce — so never cut off the live ball.)
+    rsx = api.split_vector(t.receive_stance(), 0)
+    if _recv_known() < 0.5:
+        return rsx
+    b1x = bounce_x()
+    b1z = bounce_z()
+    b2 = t.predicted_2nd_bounce()
+    b2x = api.split_vector(b2, 0)
+    b2z = api.split_vector(b2, 2)
+    dx = b2x - b1x
+    dz = b2z - b1z
+    dist = api.sqrt(dx * dx + dz * dz)
+    if dist > 0.001:
+        return _clamp_half(b1x + dx / dist * 1.05)
+    else:
+        return _clamp_half(b1x)
+
+
+def receive_z():
+    # See receive_x: same stance, z component (no half-clamp on z).
+    rsz = api.split_vector(t.receive_stance(), 2)
+    if _recv_known() < 0.5:
+        return rsz
+    b1x = bounce_x()
+    b1z = bounce_z()
+    b2 = t.predicted_2nd_bounce()
+    b2x = api.split_vector(b2, 0)
+    b2z = api.split_vector(b2, 2)
+    dx = b2x - b1x
+    dz = b2z - b1z
+    dist = api.sqrt(dx * dx + dz * dz)
+    if dist > 0.001:
+        return b1z + dz / dist * 1.05
+    else:
+        return b1z
 
 
 def land_t():
@@ -157,6 +220,10 @@ def _avail_at(strike, dba, f, spd):
 
 
 def plan_x():
+    # Serve in flight, pre-bounce: interception is impossible (the game
+    # enforces Must Wait For Bounce), so hold the receive stance.
+    if t.must_wait_for_bounce():
+        return receive_x()
     s = _own_sign()
     self_pos = api.position_of(t.self())
     sx = api.split_vector(self_pos, 0)
@@ -173,11 +240,11 @@ def plan_x():
     stamina = t.self_stamina_pct()
     # Walk ladder, earliest first.
     f = 0.33
-    if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) > _avail_at(strike, dba, f, spd):
+    if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
         f = 0.66
-        if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) > _avail_at(strike, dba, f, spd):
+        if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
             f = 1.0
-            if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) > _avail_at(strike, dba, f, spd):
+            if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
                 won = 0.0
             else:
                 won = 1.0
@@ -201,7 +268,15 @@ def plan_x():
                 f = 1.0
                 if _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd) > 0.5:
                     return _clamp_half(bx + (ax - bx) * f)
-    return _clamp_half(ax)
+    # Perfect unreachable: EARLY cutoff at the live ball, not a late jam
+    # at the landing — unless it is a lob (above 2.5m, comes down late).
+    ball_now = t.ball_position()
+    bpx = api.split_vector(ball_now, 0)
+    bpy = api.split_vector(ball_now, 1)
+    if bpy > 2.5:
+        return _clamp_half(ax)
+    else:
+        return _clamp_half(bpx)
 
 
 def _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd):
@@ -217,6 +292,9 @@ def _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd):
 
 
 def plan_z():
+    # See plan_x: no interception before the serve bounce.
+    if t.must_wait_for_bounce():
+        return receive_z()
     self_pos = api.position_of(t.self())
     sx = api.split_vector(self_pos, 0)
     sz = api.split_vector(self_pos, 2)
@@ -231,11 +309,11 @@ def plan_z():
     dba = api.sqrt(dabx * dabx + dabz * dabz)
     stamina = t.self_stamina_pct()
     f = 0.33
-    if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) > _avail_at(strike, dba, f, spd):
+    if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
         f = 0.66
-        if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) > _avail_at(strike, dba, f, spd):
+        if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
             f = 1.0
-            if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) > _avail_at(strike, dba, f, spd):
+            if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
                 won = 0.0
             else:
                 won = 1.0
@@ -257,4 +335,10 @@ def plan_z():
                 f = 1.0
                 if _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd) > 0.5:
                     return bz + (az - bz) * f
-    return az
+    ball_now = t.ball_position()
+    bpy = api.split_vector(ball_now, 1)
+    bpz = api.split_vector(ball_now, 2)
+    if bpy > 2.5:
+        return az
+    else:
+        return bpz

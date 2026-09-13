@@ -629,7 +629,7 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                 wire_val(&mut em, &vals, *v, t, "Float1");
                 vals.push(Val::Const(0.0)); // placeholder: op id alignment
             }
-            Op::TennisGet { kind, index, .. } => {
+            Op::TennisGet { kind, index, label } => {
                 require_game(game, "tennis", "tennis_get")?;
                 let node_kind = match kind.as_str() {
                     "bool" => "TennisGetBool",
@@ -638,7 +638,21 @@ pub fn compile(desc: &Description) -> Result<(serde_json::Value, CompileReport),
                     "transform" => "TennisGetTransform",
                     other => return Err(format!("unknown tennis sensor kind {other:?}")),
                 };
-                let n = em.node(node_kind, index.to_string());
+                // Tennis sensors are `DROPDOWN_MODIFIER_AS_LABEL` nodes
+                // (AIGamePyLibrary/data.py): Unity resolves the sensor by the
+                // option TEXT, never by dropdown index. Save evidence:
+                // titanium54/Adam/Apex store `modifier = "Ball Position"`,
+                // while an index-modifier save reads back as a dead sensor
+                // (0.0 forever). The index is builder-order only and cannot be
+                // reconstructed game-side, so refuse to emit one.
+                if label.trim().is_empty() {
+                    return Err(format!(
+                        "tennis_get {kind} index {index} has no Unity label — \
+                         TennisGet* modifiers are matched as option TEXT, not \
+                         as an index; the frontend must supply the label"
+                    ));
+                }
+                let n = em.node(node_kind, label.clone());
                 vals.push(Val::Node(n, out_port(node_kind)));
             }
             Op::SoccerGet { kind, index, .. } => {
@@ -2330,5 +2344,75 @@ mod tests {
         let not_save = serde_json::json!({"schema": "graphc-desc-v1"});
         assert!(compact(&not_save, Mode::O2).is_err());
         assert!(Mode::parse("banana").is_err());
+    }
+
+    /// Regression (the v57 "cannot hit the ball once" bug): `TennisGet*` and
+    /// `TennisAutoSwing` are `DROPDOWN_MODIFIER_AS_LABEL` nodes — Unity matches
+    /// the dropdown on the option **text**, so a numeric index matches no option
+    /// at all: the gate holds its default and the sensor reads dead for the
+    /// whole match (ball forever `(0,0,0)`). The emitter must write `label`,
+    /// never `index`. See `docs/TENNIS_MODIFIER_ENCODING.md`.
+    #[test]
+    fn tennis_sensors_emit_unity_labels_not_indices() {
+        for version in ["v0.14", "v15f"] {
+            let ops = vec![
+                Op::TennisGet { kind: "vector3".into(), index: 8,
+                                label: "Legal Serve Target".into() },       // 0
+                Op::VecSplit { v: 0, i: 0 },                                // 1
+                Op::VecSplit { v: 0, i: 2 },                                // 2
+                const_op(0.0),                                              // 3
+                Op::TennisGet { kind: "bool".into(), index: 5,
+                                label: "Is Self Actively Serving".into() },  // 4
+                Op::TennisGet { kind: "float".into(), index: 27,
+                                label: "Self Time To Destination".into() },  // 5
+                Op::TennisGet { kind: "transform".into(), index: 3,
+                                label: "Ball".into() },                      // 6
+                Op::TransformPos { v: 6 },                                  // 7
+                Op::TennisAutoSwing { shot: 5,
+                                      mode: "Prefer Charge".into() },        // 8
+                Op::TennisMove { x: 1, z: 2, swing: Some(4),
+                                 shot: Some(8), sprint: None },              // 9
+            ];
+            let (save, _) = compile(&test_desc("tennis", version, ops))
+                .unwrap_or_else(|e| panic!("sensor bot must compile for {version}: {e}"));
+
+            for (kind, label, index) in [
+                ("TennisGetVector3", "Legal Serve Target", 8usize),
+                ("TennisGetBool", "Is Self Actively Serving", 5),
+                ("TennisGetFloat", "Self Time To Destination", 27),
+                ("TennisGetTransform", "Ball", 3),
+                ("TennisAutoSwing", "Prefer Charge", 1),
+            ] {
+                let nodes = kind_nodes(&save, kind);
+                assert_eq!(nodes.len(), 1, "expected one {kind} @ {version}");
+                let m = node_modifier(nodes[0]);
+                assert_eq!(
+                    m, label,
+                    "{kind} @ {version}: modifier must be the Unity option text"
+                );
+                assert_ne!(
+                    m,
+                    index.to_string(),
+                    "{kind} @ {version}: the dropdown index leaked into the save"
+                );
+            }
+        }
+    }
+
+    /// A label-less sensor cannot be encoded at all — the index is not a
+    /// substitute — so the compiler must fail loudly instead of shipping a
+    /// silently dead sensor to the game.
+    #[test]
+    fn tennis_sensor_without_label_is_a_loud_error() {
+        let ops = vec![
+            Op::TennisGet { kind: "vector3".into(), index: 0, label: "  ".into() },
+            Op::TennisMove { x: 0, z: 0, swing: None, shot: None, sprint: None },
+        ];
+        let err = compile(&test_desc("tennis", "v0.14", ops))
+            .expect_err("a label-less tennis sensor must not compile");
+        assert!(
+            err.contains("no Unity label"),
+            "error must name the missing label, got: {err}"
+        );
     }
 }
