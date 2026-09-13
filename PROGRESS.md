@@ -1,5 +1,28 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 18 (2026-09-13: v54-technique rewrite + loop semantics measured)
+
+- Titanium rewritten to the recovered v54 algorithm (`AIA_tennis/titanium/
+  python/build_titanium54.py`): stateless quadratic footrace ladder
+  (walk 8.5 / sprint 13 / racket-ring 1.0 / swing-ring 2.6, strict priority),
+  game ballistics (g=28, bounce keeps 0.78, ground 0.28, takeable y<=2.7),
+  0.55 m racket-lead solve, chase without Ball Incoming (2nd-bounce
+  ownership + live-ball fallback), sprint out (stamina>0.10), serve release
+  at 0.7 charge, reverse-minimax attack scan (8 fixed points, req fitness,
+  fastest-option shot travels with its point, fatigue shrink), virtual-ball
+  positioning (his ladder -> 6-point danger scan -> bisection ->
+  deep-center split + hold). Serve kept diagonal Flat (game-proven).
+- Verified: 1961 nodes / 4181 transitions / 0 numeric modifiers, sim 4-0 vs
+  stock, deployed as `titaniumpy`.
+- Loop semantics MEASURED in the real game (ModHost v0.15f, notebook:
+  `AIA_tennis/modhost/LOOP_SEMANTICS.md`): combinational cycles evaluate
+  once per tick, back-edge delivers previous value (P1 ramp ->10, P2 ->11/10,
+  never 10-at-0). Unrolling is target-forced; CSE audit on the 1959-op build:
+  0.0% residual duplication — compiler exact, no change needed.
+- Compiler rules learned (enforced, not documented before): helper names must
+  be unique across project modules; no helper calls inside loop bodies
+  (their returns trip the loop guard) — inline the math, hoist invariants.
+
 ## Session 17 (2026-09-13: commit label fix + serve-receive stance)
 
 - Committed the Session 16 label-vs-index fix (emitter writes Unity TEXT,

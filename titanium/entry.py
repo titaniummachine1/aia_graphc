@@ -1,26 +1,27 @@
 """Titanium rewrite — tick wires feet, memory, strike type, and target.
 
-Feet: serve stance on serve; rally: walk the bounce only when arrival
-timing says go (reach_t <= t_land + margin — never camp in the zone,
-camping scores LATE; every strike costs 0.36s recover, so the first
-zone tick should BE the contact), hold home otherwise.
-Memory: rally counter, last-attack side, own-strike detector
-(Shot: Last Self Shot id change) + struck counter — bare names assigned
-HERE, memory.py only declares and computes.
-Strike: Flat serve into the hardcoded diagonal box (sensor stubbed);
-rally Topspin on attackable balls else Flat, open-court corners blended
-central by fatigue, clamped in-bounds. Shot id drives move AND swing.
+Feet (stateless, re-solved every tick): serve stance on serve; receive
+park while Must Wait For Bounce (1.05u past bounce 1 toward bounce 2,
+else in-game Receive Stance — interception code cannot run there);
+rally chase = closed-form footrace ladder (walk 8.5 / sprint 13 /
+racket 1.0 / swing 2.6, stamina-gated sprint) when the ball is ours,
+else virtual-ball positioning (his ladder -> danger scan -> deep split).
+Memory: rally counter + own-strike detector (telemetry only).
+Strike: Flat serve into the hardcoded diagonal box (released at 0.7
+charge); rally shot = reverse-minimax attack scan (hardest to catch,
+fastest option travels with its point), always-hold Prefer Charge.
 """
 import AIA_Comp_Libry.tennis.v15f as t
 import aim
 import intercept
 from consts import SAFE_X, SAFE_Z
-from memory import have_prev, last_side, next_shots, next_side, prev_shot, shots_seen, struck
+from memory import have_prev, next_shots, prev_shot, shots_seen, struck
 
 
 def tick(api):
     serving = t.is_self_actively_serving()
     incoming = t.ball_incoming()
+    must_wait = t.must_wait_for_bounce()
 
     if incoming:
         inc = 1.0
@@ -28,8 +29,7 @@ def tick(api):
         inc = 0.0
     shots_seen = next_shots(shots_seen, inc)
 
-    # --- own-strike occurrence this tick (recoil starts HERE: 0.36s
-    # defenseless, charge wiped — retreat, don't admire the shot) ---
+    # --- own-strike occurrence this tick (telemetry only) ---
     cur_shot = t.shot_last_self_shot()
     hit = 0.0
     if cur_shot > 0.0 - 0.5:
@@ -41,14 +41,10 @@ def tick(api):
     if hit > 0.5:
         struck = struck + 1.0
 
-    # --- feet: minimax cover (walk ladder, then stamina-gated sprint) ---
-    # Serve receive: while Must Wait For Bounce is true, interception is
-    # impossible, so hold the receive spot (predictive 1.05u past bounce 1
-    # towards bounce 2 once known, else in-game Receive Stance) — no
-    # interception code runs. The moment it clears, normal rally: chase
-    # and strike (volley included).
+    # --- feet ---
     stance = t.serve_stance()
-    must_wait = t.must_wait_for_bounce()
+    chase = intercept.want_chase()
+    sprint = intercept.want_sprint() > 0.5
     if serving:
         walk_x = api.split_vector(stance, 0)
         walk_z = api.split_vector(stance, 2)
@@ -57,22 +53,20 @@ def tick(api):
             walk_x = intercept.receive_x()
             walk_z = intercept.receive_z()
         else:
-            if incoming:
+            if chase > 0.5:
                 walk_x = intercept.plan_x()
                 walk_z = intercept.plan_z()
             else:
-                walk_x = intercept.home_x()
-                walk_z = intercept.home_z()
+                walk_x = intercept.pos_x()
+                walk_z = intercept.pos_z()
 
-    # --- strike type (dropdown ids, NOT game args: 0/1/2) ---
+    # --- strike type + target ---
     ball = t.ball_position()
-    ball_high = api.split_vector(ball, 1)
     if serving:
         shot_id = 2.0
     else:
-        shot_id = aim.pick_shot(ball_high, t.ball_speed())
+        shot_id = aim.attack_opt()
 
-    # --- strike target ---
     base_x = intercept.home_x()
     if t.is_ad_court_serve():
         is_ad = 1.0
@@ -86,22 +80,22 @@ def tick(api):
             aim_x = aim.serve_box_x(base_x)
             aim_z = aim.serve_box_z(is_ad)
     else:
-        opp = api.position_of(t.opponent())
-        opp_z = api.split_vector(opp, 2)
-        corner = aim.pick_z(opp_z, last_side)
-        risk = api.clamp(t.rally_fatigue() + t.deuce_fatigue(), 0.0, 1.0)
-        aim_x = aim.rally_deep_x(base_x)
-        # 1-ply: open court, blended central by fatigue. (The 2-ply
-        # reply-backprop was reverted for real-game frame cost — the game
-        # is NOT memoized, so each extra evaluation fans out.)
-        aim_z = aim.blend_corner(corner, risk)
-
-    last_side = next_side(last_side, aim_z)
+        aim_x = aim.attack_x()
+        aim_z = aim.attack_z()
 
     aim_x = api.clamp(aim_x, 0.0 - SAFE_X, SAFE_X)
     aim_z = api.clamp(aim_z, 0.0 - SAFE_Z, SAFE_Z)
 
-    swing = t.auto_swing(shot_id)
+    # --- swing: always-hold rally, serve releases at 0.7 charge ---
+    auto = t.auto_swing(shot_id)
+    if serving:
+        if t.self_swing_charge_pct() >= 0.7:
+            swing = auto
+        else:
+            swing = t.self_swing_charge_pct() >= 0.0
+    else:
+        swing = auto
+
     api.plot("T.shots", shots_seen)
     api.plot("T.struck", struck)
     api.plot("T.hit", hit)
@@ -110,5 +104,6 @@ def tick(api):
     api.plot("T.aim_z", aim_z)
     api.plot("T.walk_x", walk_x)
     api.plot("T.walk_z", walk_z)
+    api.plot("T.chase", chase)
     t.aim(aim_x, aim_z)
-    t.move(walk_x, walk_z, swing, shot_id)
+    t.move(walk_x, walk_z, swing, shot_id, sprint)

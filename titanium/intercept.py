@@ -1,51 +1,42 @@
-"""Where to stand + when: closed-form ballistics replaces the Euler loop.
+"""Where to stand + when: v54-style closed-form intercept ladder.
 
-Old assumption (wrong): walk to the bounce ASAP and wait there.
-Game truth: contact is tiered by zone time — first tick inside the
-perfect radius (<=1.0m) is PERFECT, camping 2+ zone ticks scores LATE
-(and every strike costs 0.36s recover). So the goal is ARRIVAL
-TIMING: reach the bounce as the ball does, never camp.
+Per-tick stateless solve of  |B + V*t - P| <= s*t + r  (footrace in the
+pitch plane against the ballistic ball), four tiers in strict order:
+  walk (8.5, ring 0) -> sprint (13, ring 0) -> racket (13, ring 1.0)
+  -> swing (13, ring 2.6),
+each gated on the ball being low enough to take (y <= 2.7) at contact.
 
-Ballistics (exact, ~10 ops — replaces 120-step Euler):
-  t_land = (vy + sqrt(vy^2 + 2*G*py)) / G   (positive root, y=0 crossing)
-  land_x = px + vx * t_land,  land_z = pz + vz * t_land
-Gravity only bends y; x/z are linear.
+Ballistics use the measured game constants (g=28, bounce keeps 0.78,
+ground 0.28), NOT earth gravity. The solve aims the RACKET: the ball is
+shifted by the 0.55 m racket lead inside the solve, so the meet point is
+where the body stands while the racket is on the ball.
 
-Minimax cover (the cheap trick): assume the opponent intercepts
-perfectly, then plays THEIR best shot against us — the deep corner
-farthest from our position. Their prep time is our negative head
-start: strike happens no earlier than max(ball-to-bounce, opp-to-bounce)
-and the ball still must fly bounce->corner. Ladder, earliest first:
-  1. three path steps (1/3, 2/3, landing) checked WALKING — first
-     reachable-in-time wins (never cross the net: clamped own half);
-  2. else the same 3 steps SPRINTING — only if stamina is above threshold
-     AND sprint lands inside the perfect window (arrive <=1s early —
-     sprinting into a camp scores LATE all the same);
-  3. else EARLY cutoff, not the landing: walk at the ball's CURRENT
-     position — meet it head-on up the path (first zone tick, stretched)
-     rather than jammed late at the landing. Lob exception: ball above
-     2.5m will come down elsewhere, so take the landing instead.
-
-Tier rules (game truth, sim-mirrored): contact inside the 1.0m perfect
-radius on the FIRST zone tick is PERFECT; 2nd+ tick anywhere is LATE;
-first 2.6m-zone tick outside perfect is EARLY. The auto-swing holds and
-auto-contacts in the perfect window; an explicit swing connects anywhere
-in 2.6m (tiered). Every strike costs 0.36s recover. Standing ON the
-ball's path early is perfect (auto-contact at 1m as it arrives); the
-ladder's set-margin (0.1s, feet set before contact) plus the no-camp
-rule encode exactly this. Sim models no physics penalty per tier —
-game-side recoil is real but unmeasured (contact-grading fixture
-uncaptured), so the code plays for perfect and degrades to early.
+The same ladder runs from the opponent's perspective (his meet point +
+meet time = launch of a virtual ball that does not exist yet). While the
+ball is his, we intercept the virtual ball (negative-t budget), shaded
+deep-center. No Ball Incoming anywhere: chase = 2nd-bounce ownership
+(primary) + live-ball-on-our-side fallback (sticky, no flicker).
 """
 import AIA_Comp_Libry.tennis.v15f as t
 
+WALK = 8.5
+SPRINT = 13.0
+R_RACKET = 1.0
+R_SWING = 2.6
+BALL_G = 28.0
+GROUND = 0.28
+KEEP = 0.78
+TAKE_H = 2.7
+LEAD = 0.55
+STAM_GATE = 0.10
+PARK_D = 1.05
 
-def bounce_x():
-    return api.split_vector(t.predicted_bounce(), 0)
 
-
-def bounce_z():
-    return api.split_vector(t.predicted_bounce(), 2)
+def _own_sign():
+    if home_x() > 0.0:
+        return 1.0
+    else:
+        return 0.0 - 1.0
 
 
 def home_x():
@@ -56,6 +47,368 @@ def home_z():
     return api.split_vector(t.center_of_back(), 2)
 
 
+def bounce_x():
+    return api.split_vector(t.predicted_bounce(), 0)
+
+
+def bounce_z():
+    return api.split_vector(t.predicted_bounce(), 2)
+
+
+def _ball_x():
+    return api.split_vector(t.ball_position(), 0)
+
+
+def _ball_y():
+    return api.split_vector(t.ball_position(), 1)
+
+
+def _ball_z():
+    return api.split_vector(t.ball_position(), 2)
+
+
+def _vel_x():
+    return api.split_vector(t.ball_velocity(), 0)
+
+
+def _vel_y():
+    return api.split_vector(t.ball_velocity(), 1)
+
+
+def _vel_z():
+    return api.split_vector(t.ball_velocity(), 2)
+
+
+def _self_x():
+    return api.split_vector(api.position_of(t.self()), 0)
+
+
+def _self_z():
+    return api.split_vector(api.position_of(t.self()), 2)
+
+
+def _opp_x():
+    return api.split_vector(api.position_of(t.opponent()), 0)
+
+
+def _opp_z():
+    return api.split_vector(api.position_of(t.opponent()), 2)
+
+
+def _dist(ax, az, bx, bz):
+    dx = ax - bx
+    dz = az - bz
+    return api.sqrt(dx * dx + dz * dz)
+
+
+# ---- game ballistics (measured constants) ----
+
+def _t_bounce():
+    py = _ball_y()
+    vy = _vel_y()
+    inside = vy * vy + 56.0 * (py - GROUND)
+    if inside < 0.0:
+        inside = 0.0
+    return (vy + api.sqrt(inside)) / BALL_G
+
+
+def _y_at(T):
+    py = _ball_y()
+    vy = _vel_y()
+    tb = _t_bounce()
+    y_pre = py + vy * T - 14.0 * T * T
+    vy2 = api.abs(vy - BALL_G * tb) * KEEP
+    if vy2 < 0.5:
+        vy2 = 0.5
+    dt2 = T - tb
+    if dt2 < 0.0:
+        dt2 = 0.0
+    y_post = GROUND + vy2 * dt2 - 14.0 * dt2 * dt2
+    if T <= tb:
+        return y_pre
+    else:
+        return y_post
+
+
+# ---- quadratic footrace |B + V*t - P| <= s*t + r ----
+
+def _eff_ours_x():
+    return _ball_x() + _own_sign() * LEAD
+
+
+def _eff_his_x():
+    return _ball_x() - _own_sign() * LEAD
+
+
+def _qa(s, vx, vz):
+    a = vx * vx + vz * vz - s * s
+    if api.abs(a) < 0.01:
+        return 0.01
+    else:
+        return a
+
+
+def _qb(px, pz, s, r, ex, ez, vx, vz):
+    dx = ex - px
+    dz = ez - pz
+    return 2.0 * (vx * dx + vz * dz - s * r)
+
+
+def _qc(px, pz, r, ex, ez):
+    dx = ex - px
+    dz = ez - pz
+    return dx * dx + dz * dz - r * r
+
+
+def _qT(px, pz, s, r, ex, ez, vx, vz):
+    a = _qa(s, vx, vz)
+    b = _qb(px, pz, s, r, ex, ez, vx, vz)
+    c = _qc(px, pz, r, ex, ez)
+    disc = b * b - 4.0 * a * c
+    if disc < 0.0:
+        disc = 0.0
+    if disc > 1000000.0:
+        disc = 1000000.0
+    te = (0.0 - b - api.sqrt(disc)) / (2.0 * a)
+    if te < 0.0:
+        return 0.0
+    else:
+        return te
+
+
+def _qok(px, pz, s, r, ex, ez, vx, vz):
+    a = _qa(s, vx, vz)
+    b = _qb(px, pz, s, r, ex, ez, vx, vz)
+    c = _qc(px, pz, r, ex, ez)
+    disc = b * b - 4.0 * a * c
+    if disc < 0.0:
+        return 0.0
+    sq = api.sqrt(disc)
+    te = (0.0 - b - sq) / (2.0 * a)
+    tx = (0.0 - b + sq) / (2.0 * a)
+    if a > 0.0:
+        if tx > 0.0:
+            win = 1.0
+        else:
+            win = 0.0
+    else:
+        if te > 0.0:
+            win = 1.0
+        else:
+            win = 0.0
+    if win < 0.5:
+        return 0.0
+    T = te
+    if T < 0.0:
+        T = 0.0
+    if _y_at(T) > TAKE_H:
+        return 0.0
+    return 1.0
+
+
+def _tier_s(tier):
+    if tier > 0.5:
+        return SPRINT
+    else:
+        return WALK
+
+
+def _tier_r(tier):
+    r = 0.0
+    if tier > 1.5:
+        r = R_RACKET
+    if tier > 2.5:
+        r = R_SWING
+    return r
+
+
+# ---- OUR ladder (tiers 0 walk, 1 sprint, 2 racket, 3 swing) ----
+
+def _our_T(tier):
+    return _qT(_self_x(), _self_z(), _tier_s(tier), _tier_r(tier),
+               _eff_ours_x(), _ball_z(), _vel_x(), _vel_z())
+
+
+def _our_ok(tier):
+    return _qok(_self_x(), _self_z(), _tier_s(tier), _tier_r(tier),
+                _eff_ours_x(), _ball_z(), _vel_x(), _vel_z())
+
+
+def _our_meet_x(tier):
+    return _ball_x() + _vel_x() * _our_T(tier)
+
+
+def _our_meet_z(tier):
+    return _ball_z() + _vel_z() * _our_T(tier)
+
+
+def _w_ok():
+    return _our_ok(0)
+
+
+def _s_ok():
+    if _our_ok(0) > 0.5:
+        return 0.0
+    return _our_ok(1)
+
+
+def _r_ok():
+    if _our_ok(0) > 0.5:
+        return 0.0
+    if _our_ok(1) > 0.5:
+        return 0.0
+    return _our_ok(2)
+
+
+def _v_ok():
+    if _our_ok(0) > 0.5:
+        return 0.0
+    if _our_ok(1) > 0.5:
+        return 0.0
+    if _our_ok(2) > 0.5:
+        return 0.0
+    return _our_ok(3)
+
+
+def _meet_x():
+    x = _our_meet_x(3)
+    if _r_ok() > 0.5:
+        x = _our_meet_x(2)
+    if _s_ok() > 0.5:
+        x = _our_meet_x(1)
+    if _w_ok() > 0.5:
+        x = _our_meet_x(0)
+    return x
+
+
+def _meet_z():
+    z = _our_meet_z(3)
+    if _r_ok() > 0.5:
+        z = _our_meet_z(2)
+    if _s_ok() > 0.5:
+        z = _our_meet_z(1)
+    if _w_ok() > 0.5:
+        z = _our_meet_z(0)
+    return z
+
+
+def plan_x():
+    # Serve in flight, pre-bounce: interception is impossible (the game
+    # enforces Must Wait For Bounce), so hold the receive stance.
+    if t.must_wait_for_bounce():
+        return receive_x()
+    x = _meet_x()
+    if x > 15.0:
+        x = 15.0
+    if x < 0.0 - 15.0:
+        x = 0.0 - 15.0
+    if x * _own_sign() < 0.3:
+        x = _own_sign() * 0.3
+    if t.ball_in_swing_range():
+        return _ball_x()
+    else:
+        return x
+
+
+def plan_z():
+    # See plan_x: no interception before the serve bounce.
+    if t.must_wait_for_bounce():
+        return receive_z()
+    z = _meet_z()
+    if z > 7.5:
+        z = 7.5
+    if z < 0.0 - 7.5:
+        z = 0.0 - 7.5
+    if t.ball_in_swing_range():
+        return _ball_z()
+    else:
+        return z
+
+
+# ---- HIS ladder (same solve from his position, his racket lead) ----
+
+def _his_T(tier):
+    return _qT(_opp_x(), _opp_z(), _tier_s(tier), _tier_r(tier),
+               _eff_his_x(), _ball_z(), _vel_x(), _vel_z())
+
+
+def _his_ok(tier):
+    return _qok(_opp_x(), _opp_z(), _tier_s(tier), _tier_r(tier),
+                _eff_his_x(), _ball_z(), _vel_x(), _vel_z())
+
+
+def _ho_ok(tier):
+    if tier < 0.5:
+        return _his_ok(0)
+    if tier < 1.5:
+        if _his_ok(0) > 0.5:
+            return 0.0
+        return _his_ok(1)
+    if tier < 2.5:
+        if _his_ok(0) > 0.5:
+            return 0.0
+        if _his_ok(1) > 0.5:
+            return 0.0
+        return _his_ok(2)
+    if _his_ok(0) > 0.5:
+        return 0.0
+    if _his_ok(1) > 0.5:
+        return 0.0
+    if _his_ok(2) > 0.5:
+        return 0.0
+    return _his_ok(3)
+
+
+def _his_meet_x(tier):
+    return _ball_x() + _vel_x() * _his_T(tier)
+
+
+def _his_meet_z(tier):
+    return _ball_z() + _vel_z() * _his_T(tier)
+
+
+def opp_meet_x():
+    # His launch point: first feasible tier, else where he stands.
+    x = _opp_x()
+    if _ho_ok(3) > 0.5:
+        x = _his_meet_x(3)
+    if _ho_ok(2) > 0.5:
+        x = _his_meet_x(2)
+    if _ho_ok(1) > 0.5:
+        x = _his_meet_x(1)
+    if _ho_ok(0) > 0.5:
+        x = _his_meet_x(0)
+    return x
+
+
+def opp_meet_z():
+    z = _opp_z()
+    if _ho_ok(3) > 0.5:
+        z = _his_meet_z(3)
+    if _ho_ok(2) > 0.5:
+        z = _his_meet_z(2)
+    if _ho_ok(1) > 0.5:
+        z = _his_meet_z(1)
+    if _ho_ok(0) > 0.5:
+        z = _his_meet_z(0)
+    return z
+
+
+def opp_t_meet():
+    T = 999.0
+    if _ho_ok(3) > 0.5:
+        T = _his_T(3)
+    if _ho_ok(2) > 0.5:
+        T = _his_T(2)
+    if _ho_ok(1) > 0.5:
+        T = _his_T(1)
+    if _ho_ok(0) > 0.5:
+        T = _his_T(0)
+    return T
+
+
+# ---- chase / sprint gates (no Ball Incoming) ----
+
 def _recv_known():
     # Landing prediction available once the game knows where the
     # opponent aims (time-to-ground > 0; 0.0 while the ball is dead).
@@ -65,12 +418,41 @@ def _recv_known():
         return 0.0
 
 
+def want_chase():
+    # Threat = the ball is ours to take: 2nd-bounce ownership (primary)
+    # or a live ball on our side (sticky fallback, never flickers).
+    if t.must_wait_for_bounce():
+        return 0.0
+    if _recv_known() > 0.5:
+        b2x = api.split_vector(t.predicted_2nd_bounce(), 0)
+        if b2x * _own_sign() > 0.0:
+            return 1.0
+    if t.ball_on_self_side():
+        if t.ball_speed() > 0.1:
+            return 1.0
+    return 0.0
+
+
+def want_sprint():
+    # Sprint only when walking cannot do it and stamina allows it.
+    if want_chase() < 0.5:
+        return 0.0
+    if t.self_stamina_pct() > STAM_GATE:
+        if _s_ok() > 0.5:
+            return 1.0
+        if _r_ok() > 0.5:
+            return 1.0
+        if _v_ok() > 0.5:
+            return 1.0
+    return 0.0
+
+
+# ---- serve receive: predictive park or in-game stance ----
+
 def receive_x():
     # Predictive receive stance: 1.05 units behind the FIRST bounce
     # towards the SECOND bounce (room to swing after it lands).
     # Fallback: in-game Receive Stance until the aim is known.
-    # (Interception before the serve bounce is impossible — the game
-    # enforces Must Wait For Bounce — so never cut off the live ball.)
     rsx = api.split_vector(t.receive_stance(), 0)
     if _recv_known() < 0.5:
         return rsx
@@ -83,9 +465,9 @@ def receive_x():
     dz = b2z - b1z
     dist = api.sqrt(dx * dx + dz * dz)
     if dist > 0.001:
-        return _clamp_half(b1x + dx / dist * 1.05)
+        return b1x + dx / dist * PARK_D
     else:
-        return _clamp_half(b1x)
+        return b1x
 
 
 def receive_z():
@@ -102,243 +484,355 @@ def receive_z():
     dz = b2z - b1z
     dist = api.sqrt(dx * dx + dz * dz)
     if dist > 0.001:
-        return b1z + dz / dist * 1.05
+        return b1z + dz / dist * PARK_D
     else:
         return b1z
 
 
-def land_t():
-    p = t.ball_position()
-    v = t.ball_velocity()
-    py = api.split_vector(p, 1)
-    vy = api.split_vector(v, 1)
-    if py > 0.0:
-        disc = vy * vy + 2.0 * 9.81 * py
-        return (vy + api.sqrt(disc)) / 9.81
-    else:
-        return 0.0
+# ---- positioning: virtual ball (his best reply before it exists) ----
+
+def _danger_x():
+    # His hardest reply point on our half (max required catch speed,
+    # tiebreak: wider angle off his launch). Fixed 6-point grid.
+    s = _own_sign()
+    ox = opp_meet_x()
+    oz = opp_meet_z()
+    Tm = opp_t_meet()
+    if Tm < 0.0:
+        Tm = 0.0
+    if Tm > 2.0:
+        Tm = 2.0
+    head = WALK * Tm
+    best_x = s * 14.0
+    best_fit = 0.0 - 1.0
+    best_dot = 2.0
+    sx = _self_x()
+    sz = _self_z()
+    ux = sx - ox
+    uz = sz - oz
+    ulen = api.clamp(api.sqrt(ux * ux + uz * uz), 0.001, 100.0)
+    for i in range(6):
+        if i == 0:
+            px = s * 14.0
+            pz = 6.0
+        if i == 1:
+            px = s * 14.0
+            pz = 0.0 - 6.0
+        if i == 2:
+            px = s * 7.0
+            pz = 6.0
+        if i == 3:
+            px = s * 7.0
+            pz = 0.0 - 6.0
+        if i == 4:
+            px = s * 1.0
+            pz = 6.0
+        if i == 5:
+            px = s * 1.0
+            pz = 0.0 - 6.0
+        audx = px - sx
+        audz = pz - sz
+        d_us = api.sqrt(audx * audx + audz * audz)
+        ahdx = px - ox
+        ahdz = pz - oz
+        d_his = api.sqrt(ahdx * ahdx + ahdz * ahdz)
+        slack = d_us - R_SWING - head
+        if slack < 0.0:
+            slack = 0.0
+        tf = 0.214 + 0.0257 * d_his
+        cand = 0.498 + 0.0034 * d_his
+        if cand < tf:
+            tf = cand
+        cand = 0.285 + 0.0178 * d_his
+        if cand < tf:
+            tf = cand
+        cand = 0.517 + 0.0069 * d_his
+        if cand < tf:
+            tf = cand
+        cand = 0.235 + 0.0160 * d_his
+        if cand < tf:
+            tf = cand
+        den = tf
+        if den < 0.2:
+            den = 0.2
+        if den > 10.0:
+            den = 10.0
+        req = slack / den
+        vx = px - ox
+        vz = pz - oz
+        vlen = api.clamp(api.sqrt(vx * vx + vz * vz), 0.001, 100.0)
+        dot = (vx * ux + vz * uz) / (vlen * ulen)
+        if req > best_fit + 0.35:
+            worse = 1.0
+        else:
+            worse = 0.0
+        if worse < 0.5:
+            if api.abs(req - best_fit) <= 0.35:
+                if dot < best_dot:
+                    worse = 1.0
+        if worse > 0.5:
+            best_x = px
+            best_fit = req
+            best_dot = dot
+    return best_x
 
 
-def land_x():
-    p = t.ball_position()
-    v = t.ball_velocity()
-    px = api.split_vector(p, 0)
-    vx = api.split_vector(v, 0)
-    py = api.split_vector(p, 1)
-    vy = api.split_vector(v, 1)
-    if py > 0.0:
-        disc = vy * vy + 2.0 * 9.81 * py
-        tland = (vy + api.sqrt(disc)) / 9.81
-        return px + vx * tland
-    else:
-        return px
+def _danger_z():
+    # Same scan, z component (kept separate: one float per helper).
+    s = _own_sign()
+    ox = opp_meet_x()
+    oz = opp_meet_z()
+    Tm = opp_t_meet()
+    if Tm < 0.0:
+        Tm = 0.0
+    if Tm > 2.0:
+        Tm = 2.0
+    head = WALK * Tm
+    best_z = 6.0
+    best_fit = 0.0 - 1.0
+    best_dot = 2.0
+    sx = _self_x()
+    sz = _self_z()
+    ux = sx - ox
+    uz = sz - oz
+    ulen = api.clamp(api.sqrt(ux * ux + uz * uz), 0.001, 100.0)
+    for i in range(6):
+        if i == 0:
+            px = s * 14.0
+            pz = 6.0
+        if i == 1:
+            px = s * 14.0
+            pz = 0.0 - 6.0
+        if i == 2:
+            px = s * 7.0
+            pz = 6.0
+        if i == 3:
+            px = s * 7.0
+            pz = 0.0 - 6.0
+        if i == 4:
+            px = s * 1.0
+            pz = 6.0
+        if i == 5:
+            px = s * 1.0
+            pz = 0.0 - 6.0
+        audx = px - sx
+        audz = pz - sz
+        d_us = api.sqrt(audx * audx + audz * audz)
+        ahdx = px - ox
+        ahdz = pz - oz
+        d_his = api.sqrt(ahdx * ahdx + ahdz * ahdz)
+        slack = d_us - R_SWING - head
+        if slack < 0.0:
+            slack = 0.0
+        tf = 0.214 + 0.0257 * d_his
+        cand = 0.498 + 0.0034 * d_his
+        if cand < tf:
+            tf = cand
+        cand = 0.285 + 0.0178 * d_his
+        if cand < tf:
+            tf = cand
+        cand = 0.517 + 0.0069 * d_his
+        if cand < tf:
+            tf = cand
+        cand = 0.235 + 0.0160 * d_his
+        if cand < tf:
+            tf = cand
+        den = tf
+        if den < 0.2:
+            den = 0.2
+        if den > 10.0:
+            den = 10.0
+        req = slack / den
+        vx = px - ox
+        vz = pz - oz
+        vlen = api.clamp(api.sqrt(vx * vx + vz * vz), 0.001, 100.0)
+        dot = (vx * ux + vz * uz) / (vlen * ulen)
+        if req > best_fit + 0.35:
+            worse = 1.0
+        else:
+            worse = 0.0
+        if worse < 0.5:
+            if api.abs(req - best_fit) <= 0.35:
+                if dot < best_dot:
+                    worse = 1.0
+        if worse > 0.5:
+            best_z = pz
+            best_fit = req
+            best_dot = dot
+    return best_z
 
 
-def land_z():
-    p = t.ball_position()
-    v = t.ball_velocity()
-    pz = api.split_vector(p, 2)
-    vx = api.split_vector(v, 0)
-    vz = api.split_vector(v, 2)
-    py = api.split_vector(p, 1)
-    vy = api.split_vector(v, 1)
-    if py > 0.0:
-        disc = vy * vy + 2.0 * 9.81 * py
-        tland = (vy + api.sqrt(disc)) / 9.81
-        return pz + vz * tland
-    else:
-        return pz
+def _fast_t(d):
+    # Fastest effective ball flight over all shot types (no lob).
+    t = 0.214 + 0.0257 * d
+    cand = 0.498 + 0.0034 * d
+    if cand < t:
+        t = cand
+    cand = 0.285 + 0.0178 * d
+    if cand < t:
+        t = cand
+    cand = 0.517 + 0.0069 * d
+    if cand < t:
+        t = cand
+    cand = 0.235 + 0.0160 * d
+    if cand < t:
+        t = cand
+    return t
 
 
-def _own_sign():
-    if home_x() > 0.0:
+def _virt_x():
+    # His reply landing, habit-shaded toward his scoring spot.
+    dz = _danger_z()
+    az = api.split_vector(t.opponent_average_scoring_location(), 2)
+    if az > 5.0:
+        az = 5.0
+    if az < 0.0 - 5.0:
+        az = 0.0 - 5.0
+    return _danger_x()
+
+
+def _virt_z():
+    dz = _danger_z()
+    az = api.split_vector(t.opponent_average_scoring_location(), 2)
+    if az > 5.0:
+        az = 5.0
+    if az < 0.0 - 5.0:
+        az = 0.0 - 5.0
+    return dz * 0.65 + az * 0.35
+
+
+def _virt_flight():
+    d = _dist(opp_meet_x(), opp_meet_z(), _virt_x(), _virt_z())
+    f = _fast_t(d)
+    if f < 0.2:
+        f = 0.2
+    if f > 10.0:
+        f = 10.0
+    return f
+
+
+def _virt_T0():
+    T = opp_t_meet()
+    if T < 0.0:
+        T = 0.0
+    if T > 2.0:
+        T = 2.0
+    return T
+
+
+def _vm_meet_x(speed, ring):
+    # Earliest virtual-flight fraction we cover with the negative-t
+    # budget (5-round bisection, walk first, then sprint).
+    ox = opp_meet_x()
+    oz = opp_meet_z()
+    vx = _virt_x()
+    vz = _virt_z()
+    sx = _self_x()
+    sz = _self_z()
+    flight = _virt_flight()
+    T0 = _virt_T0()
+    lo = 0.0
+    hi = flight
+    for _ in range(5):
+        mid = (lo + hi) * 0.5
+        frac = mid / flight
+        px = ox + (vx - ox) * frac
+        pz = oz + (vz - oz) * frac
+        ddx = px - sx
+        ddz = pz - sz
+        need = api.sqrt(ddx * ddx + ddz * ddz) - ring - LEAD
+        have = speed * (T0 + mid)
+        if have >= need:
+            lo = mid
+        else:
+            hi = mid
+    frac = lo / flight
+    return ox + (vx - ox) * frac
+
+
+def _vm_meet_z(speed, ring):
+    ox = opp_meet_x()
+    oz = opp_meet_z()
+    vx = _virt_x()
+    vz = _virt_z()
+    sx = _self_x()
+    sz = _self_z()
+    flight = _virt_flight()
+    T0 = _virt_T0()
+    lo = 0.0
+    hi = flight
+    for _ in range(5):
+        mid = (lo + hi) * 0.5
+        frac = mid / flight
+        px = ox + (vx - ox) * frac
+        pz = oz + (vz - oz) * frac
+        ddx = px - sx
+        ddz = pz - sz
+        need = api.sqrt(ddx * ddx + ddz * ddz) - ring - LEAD
+        have = speed * (T0 + mid)
+        if have >= need:
+            lo = mid
+        else:
+            hi = mid
+    frac = lo / flight
+    return oz + (vz - oz) * frac
+
+
+def _vm_ok(speed, ring):
+    flight = _virt_flight()
+    need = _dist(_self_x(), _self_z(), _virt_x(), _virt_z()) - ring
+    if speed * (_virt_T0() + flight) >= need:
         return 1.0
     else:
-        return 0.0 - 1.0
-
-
-def opp_aim_x():
-    # Deep corner x on OUR half (both corners share it).
-    return _own_sign() * 13.0
-
-
-def opp_aim_z(us_z):
-    # Minimax: the corner FARTHEST from us is the opponent's best shot.
-    d_hi = api.abs(us_z - 5.0)
-    d_lo = api.abs(us_z + 5.0)
-    if d_hi > d_lo:
-        return 5.0
-    else:
-        return 0.0 - 5.0
-
-
-def _ball_speed():
-    return api.clamp(t.ball_speed(), 1.0, 50.0)
-
-
-def _strike_t(bx, bz):
-    # Negative head start: opponent strikes no earlier than ball-arrival
-    # AND own-arrival at the bounce (they need both, like we do).
-    ball = t.ball_position()
-    px = api.split_vector(ball, 0)
-    py = api.split_vector(ball, 1)
-    pz = api.split_vector(ball, 2)
-    opp = api.position_of(t.opponent())
-    ox = api.split_vector(opp, 0)
-    oz = api.split_vector(opp, 2)
-    spd = _ball_speed()
-    dx = bx - px
-    dz = bz - pz
-    t_ball = api.sqrt(dx * dx + dz * dz + py * py) / spd
-    ex = bx - ox
-    ez = bz - oz
-    t_opp = api.sqrt(ex * ex + ez * ez) / 8.5
-    if t_ball > t_opp:
-        return t_ball
-    else:
-        return t_opp
-
-
-def _clamp_half(tx):
-    s = _own_sign()
-    if tx * s > 0.0:
-        return tx
-    else:
-        return s * 0.5
-
-
-def _need_at(bx, bz, ax, az, sx, sz, f, speed):
-    qx = bx + (ax - bx) * f
-    qz = bz + (az - bz) * f
-    ex = qx - sx
-    ez = qz - sz
-    return api.sqrt(ex * ex + ez * ez) / speed
-
-
-def _avail_at(strike, dba, f, spd):
-    return strike + dba * f / spd
-
-
-def plan_x():
-    # Serve in flight, pre-bounce: interception is impossible (the game
-    # enforces Must Wait For Bounce), so hold the receive stance.
-    if t.must_wait_for_bounce():
-        return receive_x()
-    s = _own_sign()
-    self_pos = api.position_of(t.self())
-    sx = api.split_vector(self_pos, 0)
-    sz = api.split_vector(self_pos, 2)
-    bx = bounce_x()
-    bz = bounce_z()
-    ax = s * 13.0
-    az = opp_aim_z(sz)
-    spd = _ball_speed()
-    strike = _strike_t(bx, bz)
-    dabx = ax - bx
-    dabz = az - bz
-    dba = api.sqrt(dabx * dabx + dabz * dabz)
-    stamina = t.self_stamina_pct()
-    # Walk ladder, earliest first.
-    f = 0.33
-    if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
-        f = 0.66
-        if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
-            f = 1.0
-            if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
-                won = 0.0
-            else:
-                won = 1.0
-        else:
-            won = 1.0
-    else:
-        won = 1.0
-    if won > 0.5:
-        return _clamp_half(bx + (ax - bx) * f)
-    # Sprint ladder: stamina-gated, and only into the perfect window
-    # (sprinting into a camp scores LATE all the same).
-    if stamina > 0.3:
-        f = 0.33
-        if _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd) > 0.5:
-            return _clamp_half(bx + (ax - bx) * f)
-        else:
-            f = 0.66
-            if _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd) > 0.5:
-                return _clamp_half(bx + (ax - bx) * f)
-            else:
-                f = 1.0
-                if _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd) > 0.5:
-                    return _clamp_half(bx + (ax - bx) * f)
-    # Perfect unreachable: EARLY cutoff at the live ball, not a late jam
-    # at the landing — unless it is a lob (above 2.5m, comes down late).
-    ball_now = t.ball_position()
-    bpx = api.split_vector(ball_now, 0)
-    bpy = api.split_vector(ball_now, 1)
-    if bpy > 2.5:
-        return _clamp_half(ax)
-    else:
-        return _clamp_half(bpx)
-
-
-def _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd):
-    need = _need_at(bx, bz, ax, az, sx, sz, f, 13.0)
-    avail = _avail_at(strike, dba, f, spd)
-    if need > avail:
         return 0.0
-    else:
-        if avail - need > 1.0:
-            return 0.0
-        else:
-            return 1.0
 
 
-def plan_z():
-    # See plan_x: no interception before the serve bounce.
-    if t.must_wait_for_bounce():
-        return receive_z()
-    self_pos = api.position_of(t.self())
-    sx = api.split_vector(self_pos, 0)
-    sz = api.split_vector(self_pos, 2)
-    bx = bounce_x()
-    bz = bounce_z()
-    ax = _own_sign() * 13.0
-    az = opp_aim_z(sz)
-    spd = _ball_speed()
-    strike = _strike_t(bx, bz)
-    dabx = ax - bx
-    dabz = az - bz
-    dba = api.sqrt(dabx * dabx + dabz * dabz)
-    stamina = t.self_stamina_pct()
-    f = 0.33
-    if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
-        f = 0.66
-        if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
-            f = 1.0
-            if _need_at(bx, bz, ax, az, sx, sz, f, 8.5) + 0.1 > _avail_at(strike, dba, f, spd):
-                won = 0.0
-            else:
-                won = 1.0
-        else:
-            won = 1.0
+def pos_x():
+    # Positioning target: earliest comfortable virtual tier, anchored
+    # deep-center (split shade), held once reached (regen stamina).
+    x = _virt_x()
+    if x > 15.0:
+        x = 15.0
+    if x < 0.0 - 15.0:
+        x = 0.0 - 15.0
+    if _vm_ok(SPRINT, 0.0) > 0.5:
+        x = _vm_meet_x(SPRINT, 0.0)
+    if _vm_ok(WALK, 0.0) > 0.5:
+        x = _vm_meet_x(WALK, 0.0)
+    if x > 15.0:
+        x = 15.0
+    if x < 0.0 - 15.0:
+        x = 0.0 - 15.0
+    anchor = _own_sign() * 13.0
+    z = _vm_meet_z(WALK, 0.0)
+    if _vm_ok(WALK, 0.0) < 0.5:
+        z = _virt_z()
+    hold_x = anchor
+    hold_z = z * 0.4
+    if _dist(_self_x(), _self_z(), hold_x, hold_z) < 1.2:
+        return _self_x()
     else:
-        won = 1.0
-    if won > 0.5:
-        return bz + (az - bz) * f
-    if stamina > 0.3:
-        f = 0.33
-        if _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd) > 0.5:
-            return bz + (az - bz) * f
-        else:
-            f = 0.66
-            if _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd) > 0.5:
-                return bz + (az - bz) * f
-            else:
-                f = 1.0
-                if _sprint_ok(bx, bz, ax, az, sx, sz, f, strike, dba, spd) > 0.5:
-                    return bz + (az - bz) * f
-    ball_now = t.ball_position()
-    bpy = api.split_vector(ball_now, 1)
-    bpz = api.split_vector(ball_now, 2)
-    if bpy > 2.5:
-        return az
+        return hold_x
+
+
+def pos_z():
+    x = _virt_x()
+    if x > 15.0:
+        x = 15.0
+    if x < 0.0 - 15.0:
+        x = 0.0 - 15.0
+    z = _virt_z()
+    if _vm_ok(SPRINT, 0.0) > 0.5:
+        z = _vm_meet_z(SPRINT, 0.0)
+    if _vm_ok(WALK, 0.0) > 0.5:
+        z = _vm_meet_z(WALK, 0.0)
+    if z > 7.5:
+        z = 7.5
+    if z < 0.0 - 7.5:
+        z = 0.0 - 7.5
+    hold_z = z * 0.4
+    hold_x = _own_sign() * 13.0
+    if _dist(_self_x(), _self_z(), hold_x, hold_z) < 1.2:
+        return _self_z()
     else:
-        return bpz
+        return hold_z
