@@ -1,12 +1,15 @@
 """Strike targets: the shared minimax evaluator, our direction.
 
-For each of 8 candidate landings on the opponent half we score how hard it
-is for HIM to intercept a ball launched by us toward it — ladder tier he
-must extend to * 1000 + required speed — and take the hardest. The shot id
-travels with its point (fastest option for that distance). Edge aims shrink
-toward center under fatigue scatter. Serve stays hardcoded diagonal Flat
-(game-proven in-box). Same function as the danger scan, opposite direction:
-no duplicate minimax logic anywhere.
+For each of 8 candidate landings we score every shot type by how hard it
+is for HIM to intercept — cheapest covering tier (walk/sprint/racket/swing
+across first AND second bounce, his stamina gating his sprint) times 1000
+plus required speed — and take the hardest (point, shot) pair. The shot id
+travels with its point. Each type runs its true family flight time and its
+true bounce physics (topspin kicks, slice skids, drop dies); curve bend only
+reshapes mid-flight, never the landing time, so arrival evaluation needs no
+bend term. Edge aims shrink toward center under fatigue scatter. Serve stays
+hardcoded diagonal Flat (game-proven in-box). Same function as the danger
+scan, opposite direction: no duplicate minimax logic anywhere.
 """
 import AIA_Comp_Libry.tennis.v15f as t
 import intercept
@@ -29,91 +32,139 @@ def serve_box_z(is_ad):
         return 3.0
 
 
-def _fast_opt(d):
-    opt = 0.0
-    t = 0.214 + 0.0257 * d
-    cand = 0.498 + 0.0034 * d
-    if cand < t:
-        t = cand
+def _att_best(px, pz):
+    # Our optimal shot AT this point: max over shot types of his difficulty.
+    stam = t.opponent_stamina_pct()
+    sx = intercept._self_x()
+    sz = intercept._self_z()
+    ox = intercept._opp_x()
+    oz = intercept._opp_z()
+    dx = px - sx
+    dz = pz - sz
+    d = api.sqrt(dx * dx + dz * dz)
+    best = 0.0 - 1.0
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_0(d), intercept._vy2_0(d), 1.2, 0.0)
+    if sc > best:
+        best = sc
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_1(d), intercept._vy2_1(d), 0.6724, 0.0)
+    if sc > best:
+        best = sc
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_2(d), intercept._vy2_2(d), 0.94, 0.0)
+    if sc > best:
+        best = sc
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_4(d), intercept._vy2_4(d), 0.40, 0.0)
+    if sc > best:
+        best = sc
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_6(d), intercept._vy2_6(d), 0.94, 0.0)
+    if sc > best:
+        best = sc
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_6(d), intercept._vy2_6(d), 0.94, 0.0)
+    if sc > best:
+        best = sc
+    return best
+
+
+def _att_opt(px, pz):
+    # Winning shot id at this point (tracks _att_best's winner).
+    stam = t.opponent_stamina_pct()
+    sx = intercept._self_x()
+    sz = intercept._self_z()
+    ox = intercept._opp_x()
+    oz = intercept._opp_z()
+    dx = px - sx
+    dz = pz - sz
+    d = api.sqrt(dx * dx + dz * dz)
+    best = 0.0 - 1.0
+    opt = 2.0
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_0(d), intercept._vy2_0(d), 1.2, 0.0)
+    if sc > best:
+        best = sc
+        opt = 0.0
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_1(d), intercept._vy2_1(d), 0.6724, 0.0)
+    if sc > best:
+        best = sc
         opt = 1.0
-    cand = 0.285 + 0.0178 * d
-    if cand < t:
-        t = cand
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_2(d), intercept._vy2_2(d), 0.94, 0.0)
+    if sc > best:
+        best = sc
         opt = 2.0
-    cand = 0.517 + 0.0069 * d
-    if cand < t:
-        t = cand
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_4(d), intercept._vy2_4(d), 0.40, 0.0)
+    if sc > best:
+        best = sc
         opt = 4.0
-    cand = 0.235 + 0.0160 * d
-    if cand < t:
-        t = cand
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_6(d), intercept._vy2_6(d), 0.94, 0.0)
+    if sc > best:
+        best = sc
         opt = 6.0
-    cand = 0.235 + 0.0160 * d
-    if cand < t:
+    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
+                           intercept._t1_6(d), intercept._vy2_6(d), 0.94, 0.0)
+    if sc > best:
+        best = sc
         opt = 7.0
     return opt
-
-
-def _self_d(px, pz):
-    dx = px - intercept._self_x()
-    dz = pz - intercept._self_z()
-    return api.sqrt(dx * dx + dz * dz)
 
 
 def _best_ax():
     # Fixed 8-point grid: deep/mid/half/net rows x both corners.
     o = 0.0 - intercept._own_sign()
-    sx = intercept._self_x()
-    sz = intercept._self_z()
-    ox = intercept._opp_x()
-    oz = intercept._opp_z()
     best_s = 0.0 - 1.0
     best_x = o * 13.0
     px = o * 13.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_x = px
     px = o * 13.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_x = px
     px = o * 10.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_x = px
     px = o * 10.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_x = px
     px = o * 7.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_x = px
     px = o * 7.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_x = px
     px = o * 1.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_x = px
     px = o * 1.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_x = px
@@ -122,57 +173,53 @@ def _best_ax():
 
 def _best_az():
     o = 0.0 - intercept._own_sign()
-    sx = intercept._self_x()
-    sz = intercept._self_z()
-    ox = intercept._opp_x()
-    oz = intercept._opp_z()
     best_s = 0.0 - 1.0
     best_z = 5.0
     px = o * 13.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_z = pz
     px = o * 13.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_z = pz
     px = o * 10.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_z = pz
     px = o * 10.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_z = pz
     px = o * 7.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_z = pz
     px = o * 7.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_z = pz
     px = o * 1.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_z = pz
     px = o * 1.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
         best_z = pz
@@ -181,60 +228,56 @@ def _best_az():
 
 def _best_opt():
     o = 0.0 - intercept._own_sign()
-    sx = intercept._self_x()
-    sz = intercept._self_z()
-    ox = intercept._opp_x()
-    oz = intercept._opp_z()
     best_s = 0.0 - 1.0
     best_opt = 2.0
     px = o * 13.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
-        best_opt = _fast_opt(_self_d(px, pz))
+        best_opt = _att_opt(px, pz)
     px = o * 13.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
-        best_opt = _fast_opt(_self_d(px, pz))
+        best_opt = _att_opt(px, pz)
     px = o * 10.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
-        best_opt = _fast_opt(_self_d(px, pz))
+        best_opt = _att_opt(px, pz)
     px = o * 10.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
-        best_opt = _fast_opt(_self_d(px, pz))
+        best_opt = _att_opt(px, pz)
     px = o * 7.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
-        best_opt = _fast_opt(_self_d(px, pz))
+        best_opt = _att_opt(px, pz)
     px = o * 7.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
-        best_opt = _fast_opt(_self_d(px, pz))
+        best_opt = _att_opt(px, pz)
     px = o * 1.0
     pz = 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
-        best_opt = _fast_opt(_self_d(px, pz))
+        best_opt = _att_opt(px, pz)
     px = o * 1.0
     pz = 0.0 - 5.0
-    sc = intercept._vscore(ox, oz, sx, sz, px, pz)
+    sc = _att_best(px, pz)
     if sc > best_s:
         best_s = sc
-        best_opt = _fast_opt(_self_d(px, pz))
+        best_opt = _att_opt(px, pz)
     return best_opt
 
 

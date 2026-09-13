@@ -1,5 +1,25 @@
 # PROGRESS — graphc (2026-09-11, session 3: compiler track)
 
+## Session 21 (2026-09-13: two-stage interception + 2nd-bounce deadline)
+
+- Shared evaluator now scores every (point, shot) with TRUE family flight
+  times (sim ComputeShotVelocity, q=1) and shot-specific bounce physics
+  (topspin kick 1.2x, slice skid, drop hop-clamp, spin floor), over TWO
+  landings — victim takes min(first-bounce, second-bounce) coverage, each
+  with stamina-gated walk/sprint/racket/swing tiers. Drop shots that die
+  fast score correctly high when unreachable. Curve bend needs no term
+  (landing-time evaluation; bend never moves the landing).
+- Movement: two-stage ladder (live ball, then bounced state via ring
+  inflation r+s*tb, same quadratic), walk-first selection (W0>W1, sprint
+  only if stam>0.50 AND S0/S1 beats walking, else W2/fallback). S2 never
+  selected. STAM_RESERVE=0.50 (Weaver's own gate ~0.10, no clean reserve
+  const in its graph — 33%-vs-50% sweep still open, needs this build).
+- Size fix without compiler change: per-opt ball-parameter helpers killed
+  the dead dispatch arms — 10014->6401 nodes, 22640->14057 transitions
+  (57% of ceiling). Literal-prune compiler attempt REVERTED (broke return
+  protocol on nested inlining — parked with repro, not bypassed quiet).
+- Verified: 0 numeric leaks, sim 7-0 vs stock, self-play 3-1, deployed.
+
 ## Session 20 (2026-09-13: one shared minimax, tier-scored)
 
 - Attack and danger scans unified on `_vscore` (intercept.py): victim vs a
