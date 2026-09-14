@@ -312,9 +312,27 @@ def _tier_r(tier):
 
 def _mT(tier, stage):
     # Contact time for tier/stage (999 = infeasible).
+    #
+    # COMFORT TARGET (anti-late): aim the movement at the ball's PERFECT-ring
+    # entry (r = 1.0), not the tier-ring entry. The tier ring answers "can we
+    # cover the ball at all by then"; the perfect ring answers "where will the
+    # ball be when it walks into the perfect window". Solving r = 1.0 returns
+    # the later of (ball reaches 1.0 m) and (we reach that point) — when we
+    # are fast enough the ball's time wins, so we PARK at the landing point
+    # early and the held swing releases on the FIRST perfect tick (PERFECT
+    # contact, no zero-slack arrival). When we are too slow, the solve
+    # degrades to our own arrival — same physics as before, nothing lost.
+    # Fallback: the tier-ring solve (old behavior) when the perfect point is
+    # not coverable (tier 0 covers the racket center — a tighter ask than 1.0).
     s = _tier_s(tier)
     r = _tier_r(tier)
     if stage < 1.5:
+        T1 = _solve_T(_self_x(), _self_z(), s, 1.0,
+                      _eff_ours_x(), _ball_z(), _vel_x(), _vel_z(), 0.0)
+        if _solve_ok(_self_x(), _self_z(), s, 1.0,
+                     _eff_ours_x(), _ball_z(), _vel_x(), _vel_z(),
+                     0.0, 0.0, 0.0, 0.0) > 0.5:
+            return T1
         T = _solve_T(_self_x(), _self_z(), s, r,
                      _eff_ours_x(), _ball_z(), _vel_x(), _vel_z(), 0.0)
         if _solve_ok(_self_x(), _self_z(), s, r,
@@ -331,6 +349,11 @@ def _mT(tier, stage):
         vx = _vel_x() * fwd
         vz = _vel_z() * fwd
         rr = r + s * tb
+        r1 = 1.0 + s * tb
+        T1 = _solve_T(_self_x(), _self_z(), s, r1, ex, ez, vx, vz, tb)
+        if _solve_ok(_self_x(), _self_z(), s, r1, ex, ez, vx, vz,
+                     tb, tb, _live_vy2(), 1.0) > 0.5:
+            return T1
         T = _solve_T(_self_x(), _self_z(), s, rr, ex, ez, vx, vz, tb)
         if _solve_ok(_self_x(), _self_z(), s, rr, ex, ez, vx, vz,
                      tb, tb, _live_vy2(), 1.0) > 0.5:
@@ -442,8 +465,14 @@ def _cMZ(tier):
 
 
 def _picked():
-    # Comfort order: walk direct > walk perfect > sprint direct/perfect
-    # (reserve-gated) > walk full > must-run fallback.
+    # Comfort order: stamina above 25% -> walk perfect when feasible
+    # (better contact quality; walk-direct ring-0 is near-never feasible
+    # so this rarely changes selection, but pins the preference) >
+    # walk direct > sprint direct/perfect (reserve-gated) >
+    # walk full > must-run fallback.
+    if t.self_stamina_pct() > 0.25:
+        if _cW1() > 0.5:
+            return 1.0
     if _cW0() > 0.5:
         return 0.0
     if _cW1() > 0.5:
@@ -687,10 +716,33 @@ def _recv_known():
 def want_chase():
     # Threat = the ball is ours to take: 2nd-bounce ownership (primary)
     # or a live ball on our side (sticky fallback, never flickers).
+    # Ignore-ball rules (preserve stamina, punish the striker):
+    # - 1st landing clearly out (line + ball-edge tol + 0.25 pad): his
+    #   fault, the point resolves itself — never chase.
+    # - 2nd landing outside the arena: his ball exits in flight and the
+    #   STRIKER loses it — standing still wins, chasing wastes stamina.
+    # - Live ball on our side whose next landing is outside the arena:
+    #   same self-destruct — ignore.
     if t.must_wait_for_bounce():
         return 0.0
     if _recv_known() > 0.5:
-        b2x = api.split_vector(t.predicted_2nd_bounce(), 0)
+        b1x = api.split_vector(t.predicted_bounce(), 0)
+        b1z = api.split_vector(t.predicted_bounce(), 2)
+        # 1st landing clearly out (line + ball-edge tol + 0.25 pad) = his
+        # fault -> ignore, the point resolves itself. The 2nd-bounce check
+        # is GONE (2026-09-14 correction): the 2nd bounce may land anywhere
+        # and the RECEIVER loses it — deep balls and serves must be
+        # returned, never ignored (ignoring them handed stock 14 aces).
+        if b1x > 14.25:
+            return 0.0
+        if b1x < 0.0 - 14.25:
+            return 0.0
+        if b1z > 6.25:
+            return 0.0
+        if b1z < 0.0 - 6.25:
+            return 0.0
+        b2 = t.predicted_2nd_bounce()
+        b2x = api.split_vector(b2, 0)
         if b2x * _own_sign() > 0.0:
             return 1.0
     if t.ball_on_self_side():
@@ -855,6 +907,24 @@ def _vscore(px, pz, vstam, lx, lz, tx, tz, t1, vy2, fwd, head):
     # physics: topspin kicks, slice skids, drop dies). After the second
     # bounce the point is lost, so nothing past t2 counts. Score =
     # easiest-landing tier * 1000 + required speed.
+    #
+    # Scoring legality (the real rules, both directions):
+    # - 1st landing clearly out (beyond the line + ball-edge tolerance
+    #   + 0.25 pad): the striker faults, nobody covers -> score 0.
+    # - The 2nd bounce may land ANYWHERE (the in-flight arena bound is the
+    #   FULL court length 28 / doubles 18, not the half-court — measured
+    #   2026-09-14): a deep 1st-bounce-IN shot double-bounces the receiver
+    #   out of court and WINS. No 2nd-bounce restriction. (An earlier
+    #   build zero-scored b2 outside 13.9/8.9 — that misread killed the
+    #   deep game and made want_chase ignore returnable serves.)
+    if tx > 14.25:
+        return 0.0
+    if tx < 0.0 - 14.25:
+        return 0.0
+    if tz > 6.25:
+        return 0.0
+    if tz < 0.0 - 6.25:
+        return 0.0
     t2 = t1 + 2.0 * vy2 / 28.0
     f = fwd * (t2 - t1) / t1
     b2x = tx + (tx - lx) * f
@@ -1041,17 +1111,12 @@ def _fast_t(d):
 
 
 def _virt_x():
-    # His reply landing, habit-shaded toward his scoring spot.
-    dz = _danger_z()
-    az = api.split_vector(t.opponent_average_scoring_location(), 2)
-    if az > 5.0:
-        az = 5.0
-    if az < 0.0 - 5.0:
-        az = 0.0 - 5.0
+    # His reply landing: the danger scan (his hardest point on our half).
     return _danger_x()
 
 
 def _virt_z():
+    # Habit shade: danger scan pulled 35% toward his scoring habit.
     dz = _danger_z()
     az = api.split_vector(t.opponent_average_scoring_location(), 2)
     if az > 5.0:

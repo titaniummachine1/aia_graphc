@@ -1,4 +1,53 @@
-# PROGRESS — graphc (2026-09-11, session 3: compiler track)
+# PROGRESS — graphc (2026-09-14, session 4: the sim inversion + titanium66)
+
+## Session 22 (2026-09-14: sim scoring bug + full-ladder 97W-4L)
+
+- **THE bug: sim double-bounce award INVERTED** (aia_comp-sim
+  `on_rally_bounce`): every double bounce went to the RECEIVER
+  (`striker.other()`) — unreturned shots scored for the opponent, aces
+  impossible, titanium54 "lost" to pusher, 10 ladder shutouts, the entire
+  non-transitive 25W-64L era. Raw-trace proof: serve bounced IN the box,
+  untouched, 2nd bounce +26.7, receiver +1. Fixed: STRIKER wins, 2nd-bounce
+  location irrelevant (game-truth: "2nd bounce can land anywhere, no
+  location fault"). 1st-bounce-out award was already correct. 46/46 tests.
+- **Arena-bounds misread corrected (ours)**: in-flight exit = |x| > 28 /
+  |z| > 18 — FULL court, not half; the 2nd bounce lands first, deep shots
+  are valid winners. The interim b2-inside legality (13.9/8.9) and the
+  out2/dead ignore rules were built on it — removed. Keep: 1st-bounce-out
+  (line + ball-edge 0.169 + 0.25 pad = 14.25/6.25) = fault, and ONLY that
+  as ignore-ball (ignoring serves handed stock 14 aces).
+- **titanium66** (build of record, deployed): prefer-perfect@25% walk
+  order; comfort ladder (targets the ball's perfect-ring entry — late
+  contacts 74%->~50-56%); 1st-bounce-out legality zero-scores in `_vscore`
+  (both directions); attack grid deep 13/mid 10/half 7 ±5 + recorded
+  hot-spot (3.5,±3.2), net row dropped, duplicate curve eval killed;
+  auto-swing mode "Normal Only" + serve 0.7 gate removed (vestigial).
+  7909 nodes / 17.7k transitions.
+- **Sim fidelity**: TennisAutoSwing approx = Is Ball Playable && !Must Wait
+  (approach-hold, game-measured) in lower.rs + eval.rs; world release rule
+  = first perfect tick, else zone entry when the ball's closest approach
+  > 1.0 m (toss exempt) — replaced the explicit-clause rule that let
+  raw-hold bots whiff; best-of-3 + MatchRules (--rules override, loud,
+  BOM-tolerant) + cross-set serve rotation via `total_games`;
+  StrikeEvent per-strike log (--trace-strikes / AIA_STRIKE_LOG=1) +
+  scripts/archive/strike_join.py.
+- **CRITICAL**: compiler bots need `AIA_AIM_MODEL=separate` in the sim —
+  the legacy aim latch ignores the t.aim() wire (aims fell back to
+  deep-middle 13.44; |landing-aim| 4.8 m -> 0.02-0.18 m once live). Baked
+  into run_titanium_ladder.py.
+- **Compiler**: `and`/`or` implemented (eager CompareBool fold), proven
+  bit-exact in isolation (3627-tick probe pair), then LOUD-BLOCKED — the
+  full-titanium build diverged (tick-exact 2x2 isolation: 62/64 vs 61/63);
+  root cause open; investigation note in ast_fe.py, probe recipes in
+  test_and_or.py. api.bool_and/bool_or unaffected.
+- **FULL LADDER (corrected sim, seed 7, best-of-3): titanium66 97W-4L**
+  (was 25W-64L). Losses: Apex 1-2 (13/31), LeBlock_James 1-2 (15/33),
+  slicer 0-2 (0/14), titanium2 0-2 (8/26). Record:
+  aia_comp-sim/data/tennis/titanium_ladder.jsonl.
+- Open: verify the GAME's double-bounce award from captures before
+  trusting parity; aces counter never fires (DoubleBounce reason not
+  recorded as Ace); the 4 losses; and/or root cause; depth-2 minimax
+  (spec'd in HANDOFF); game probes P1-P4 (pre-approved).
 
 ## Session 21 (2026-09-13: two-stage interception + 2nd-bounce deadline)
 

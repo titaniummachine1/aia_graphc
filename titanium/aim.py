@@ -34,6 +34,9 @@ def serve_box_z(is_ad):
 
 def _att_best(px, pz):
     # Our optimal shot AT this point: max over shot types of his difficulty.
+    # The arena-legality zero-scores live inside _vscore (1st-bounce-out
+    # faults and 2nd-bounce-out self-destructs both score 0, both
+    # directions), so deep/self-destructive candidates die here naturally.
     stam = t.opponent_stamina_pct()
     sx = intercept._self_x()
     sz = intercept._self_z()
@@ -57,10 +60,6 @@ def _att_best(px, pz):
         best = sc
     sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
                            intercept._t1_4(d), intercept._vy2_4(d), 0.40, 0.0)
-    if sc > best:
-        best = sc
-    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
-                           intercept._t1_6(d), intercept._vy2_6(d), 0.94, 0.0)
     if sc > best:
         best = sc
     sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
@@ -107,16 +106,17 @@ def _att_opt(px, pz):
     if sc > best:
         best = sc
         opt = 6.0
-    sc = intercept._vscore(ox, oz, stam, sx, sz, px, pz,
-                           intercept._t1_6(d), intercept._vy2_6(d), 0.94, 0.0)
-    if sc > best:
-        best = sc
-        opt = 7.0
     return opt
 
 
 def _best_ax():
-    # Fixed 8-point grid: deep/mid/half/net rows x both corners.
+    # Fixed 8-point grid: deep (13), mid (10), half (7) x both corners +
+    # the recorded short scoring band (3.5, +-3.2). The near-net 1.0 row
+    # is gone (badly placed — measured). Deep rows are VALID winners: the
+    # 2nd bounce may land anywhere (in-flight arena bound = FULL court
+    # 28/18, measured 2026-09-14) and an unreturned deep ball
+    # double-bounces the receiver out of court. _vscore still zero-scores
+    # 1st-bounce-out candidates (faults).
     o = 0.0 - intercept._own_sign()
     best_s = 0.0 - 1.0
     best_x = o * 13.0
@@ -144,6 +144,18 @@ def _best_ax():
     if sc > best_s:
         best_s = sc
         best_x = px
+    px = o * 5.0
+    pz = 4.0
+    sc = _att_best(px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_x = px
+    px = o * 5.0
+    pz = 0.0 - 4.0
+    sc = _att_best(px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_x = px
     px = o * 7.0
     pz = 5.0
     sc = _att_best(px, pz)
@@ -151,18 +163,6 @@ def _best_ax():
         best_s = sc
         best_x = px
     px = o * 7.0
-    pz = 0.0 - 5.0
-    sc = _att_best(px, pz)
-    if sc > best_s:
-        best_s = sc
-        best_x = px
-    px = o * 1.0
-    pz = 5.0
-    sc = _att_best(px, pz)
-    if sc > best_s:
-        best_s = sc
-        best_x = px
-    px = o * 1.0
     pz = 0.0 - 5.0
     sc = _att_best(px, pz)
     if sc > best_s:
@@ -199,6 +199,18 @@ def _best_az():
     if sc > best_s:
         best_s = sc
         best_z = pz
+    px = o * 5.0
+    pz = 4.0
+    sc = _att_best(px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_z = pz
+    px = o * 5.0
+    pz = 0.0 - 4.0
+    sc = _att_best(px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_z = pz
     px = o * 7.0
     pz = 5.0
     sc = _att_best(px, pz)
@@ -206,18 +218,6 @@ def _best_az():
         best_s = sc
         best_z = pz
     px = o * 7.0
-    pz = 0.0 - 5.0
-    sc = _att_best(px, pz)
-    if sc > best_s:
-        best_s = sc
-        best_z = pz
-    px = o * 1.0
-    pz = 5.0
-    sc = _att_best(px, pz)
-    if sc > best_s:
-        best_s = sc
-        best_z = pz
-    px = o * 1.0
     pz = 0.0 - 5.0
     sc = _att_best(px, pz)
     if sc > best_s:
@@ -254,6 +254,18 @@ def _best_opt():
     if sc > best_s:
         best_s = sc
         best_opt = _att_opt(px, pz)
+    px = o * 5.0
+    pz = 4.0
+    sc = _att_best(px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_opt = _att_opt(px, pz)
+    px = o * 5.0
+    pz = 0.0 - 4.0
+    sc = _att_best(px, pz)
+    if sc > best_s:
+        best_s = sc
+        best_opt = _att_opt(px, pz)
     px = o * 7.0
     pz = 5.0
     sc = _att_best(px, pz)
@@ -261,18 +273,6 @@ def _best_opt():
         best_s = sc
         best_opt = _att_opt(px, pz)
     px = o * 7.0
-    pz = 0.0 - 5.0
-    sc = _att_best(px, pz)
-    if sc > best_s:
-        best_s = sc
-        best_opt = _att_opt(px, pz)
-    px = o * 1.0
-    pz = 5.0
-    sc = _att_best(px, pz)
-    if sc > best_s:
-        best_s = sc
-        best_opt = _att_opt(px, pz)
-    px = o * 1.0
     pz = 0.0 - 5.0
     sc = _att_best(px, pz)
     if sc > best_s:

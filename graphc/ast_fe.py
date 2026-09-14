@@ -636,8 +636,18 @@ def _expr(ctx: _Ctx, node: ast.expr) -> int:
                 raise
             return _project_call(ctx, node)
     if isinstance(node, ast.BoolOp):
+        # BLOCKED (2026-09-14, validation round): `and`/`or` compiles to the
+        # same CompareBool node as api.bool_and/bool_or and is BIT-EXACT in
+        # isolation (chain probe vs nested-if probe, 3627 ticks, 0 diffs —
+        # graphc/tests/test_and_or.py has the probe recipes). But in the full
+        # titanium context the or-chain build (titanium62/64) diverged from
+        # the nested-if build (titanium61/63) — tick-exact 2x2 isolates point
+        # at the or+fall-through combination, root cause NOT yet understood.
+        # Policy: never silently miscompile — until root-caused, keep the
+        # loud error and nest ifs (the titanium-63 form is the verified
+        # equivalent).
         raise SyntaxError(
-            f"'and/or' is not compilable — nest if statements: "
+            f"'and/or' is not compilable yet — nest if statements: "
             f"{ast.unparse(node)[:60]!r}")
     if isinstance(node, ast.IfExp):
         raise SyntaxError(

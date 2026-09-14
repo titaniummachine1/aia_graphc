@@ -86,15 +86,14 @@ def tick(api):
     aim_x = api.clamp(aim_x, 0.0 - SAFE_X, SAFE_X)
     aim_z = api.clamp(aim_z, 0.0 - SAFE_Z, SAFE_Z)
 
-    # --- swing: always-hold rally, serve releases at 0.7 charge ---
-    auto = t.auto_swing(shot_id)
-    if serving:
-        if t.self_swing_charge_pct() >= 0.7:
-            swing = auto
-        else:
-            swing = t.self_swing_charge_pct() >= 0.0
-    else:
-        swing = auto
+    # --- swing: Normal Only, charge-keeping bypassed ---
+    # Perfect contact is always achievable by positioning (the comfort
+    # ladder parks at the perfect-ring entry), so the strike must not sit
+    # charging: the node runs in the game's default mode and the release
+    # fires at the perfect window (or zone entry when perfect is
+    # impossible — the world handles both). The old 0.7 serve-charge gate
+    # is gone: the serve releases at the toss window like every strike.
+    swing = t.auto_swing(shot_id, "Normal Only")
 
     api.plot("T.shots", shots_seen)
     api.plot("T.struck", struck)
